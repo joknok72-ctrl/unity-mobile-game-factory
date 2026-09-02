@@ -159,6 +159,8 @@ namespace RealLife.Astronomy
         {
             public double JdUtc, JdTt, LastRad, TrueObliquity;
             public Mat3 Bpn;
+            public Vec3d EarthVelEclAuPerDay; // for stellar aberration
+            public double ObserverLatRad;
             public BodyState Sun, Moon;
             public BodyState[] Planets; // Mercury, Venus, Mars, Jupiter, Saturn
             public double SunAltitudeDeg => Sun.Horizontal.ApparentAltDeg;
@@ -176,6 +178,7 @@ namespace RealLife.Astronomy
             double latRad = obs.LatitudeDeg * AstroTime.Deg2Rad;
 
             EarthStateJ2000Ecliptic(snap.JdTt, out Vec3d earthPos, out Vec3d earthVel);
+            snap.EarthVelEclAuPerDay = earthVel; snap.ObserverLatRad = latRad;
             Vec3d obsGeoKm = ObserverGeocentricEquatorialKm(obs, snap.LastRad);
             Vec3d obsGeoAu = obsGeoKm * (1.0 / AuKm);
 
@@ -255,8 +258,9 @@ namespace RealLife.Astronomy
 
         /// <summary>Apparent position of a catalog star (ICRS RA/Dec at J2000 + proper motion) in horizontal ENU.</summary>
         public static Vec3d StarToEnu(double raJ2000Rad, double decJ2000Rad, double pmRaRadPerYr, double pmDecRadPerYr,
-            SkySnapshot snap, double latRad, Vec3d earthVelEclAuPerDay)
+            SkySnapshot snap)
         {
+            double latRad = snap.ObserverLatRad; Vec3d earthVelEclAuPerDay = snap.EarthVelEclAuPerDay;
             double yrs = (snap.JdTt - AstroTime.J2000) / 365.25;
             double ra = raJ2000Rad + pmRaRadPerYr * yrs / Math.Max(1e-9, Math.Cos(decJ2000Rad));
             double dec = decJ2000Rad + pmDecRadPerYr * yrs;
