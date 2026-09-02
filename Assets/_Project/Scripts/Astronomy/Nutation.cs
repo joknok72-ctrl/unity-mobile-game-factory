@@ -122,7 +122,7 @@ namespace RealLife.Astronomy
             double dp = 0, de = 0;
             for (int i = Series.Length - 1; i >= 0; i--)
             {
-                ref readonly Term x = ref Series[i];
+                Term x = Series[i];
                 double arg = (x.Nl * el + x.Nlp * elp + x.Nf * f + x.Nd * d + x.Nom * om) % (2.0 * Math.PI);
                 double s = Math.Sin(arg), c = Math.Cos(arg);
                 dp += (x.Ps + x.Pst * t) * s + x.Pc * c;
