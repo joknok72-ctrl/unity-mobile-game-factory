@@ -38,6 +38,7 @@ float  _RL_Exposure;          // physical exposure multiplier (radiance -> displ
 float  _RL_RefractionScale;   // (P/1010)*(283/(273+T))
 float3 _RL_MoonDir;           // true direction
 float  _RL_MoonAngularRadius;
+float  _RL_MoonMagnitude;     // apparent visual magnitude (+99 when below horizon)
 float  _RL_Time;
 float3 _RL_NightSkyRadiance;  // airglow + zodiacal + unresolved starlight at zenith
 
@@ -201,5 +202,33 @@ float3 RL_NightSky(float3 dir)
     float airmass = 1.0 / (z + 0.025 * exp(-11.0 * z));
     float vanRhijn = min(airmass, 4.0);
     return _RL_NightSkyRadiance * vanRhijn;
+}
+
+// ---------------------------------------------------------------------------
+// Human visual perception (mesopic / scotopic). _RL_Scotopic: 0 = photopic (daylight), 1 = fully rod vision.
+// Rod spectral sensitivity V'(λ) peaks at 507 nm; expressed in linear sRGB weights.
+// ---------------------------------------------------------------------------
+float _RL_Scotopic;
+float3 RL_Perceive(float3 c)
+{
+    float rod = dot(c, float3(0.05, 0.55, 0.40));
+    float3 scot = rod * float3(0.72, 0.84, 1.0);     // subjective blue-grey of night vision
+    return lerp(c, scot, _RL_Scotopic);
+}
+
+// Photometric illuminance (lux) of a point source of visual magnitude m, consistent with Sun = -26.74 -> 127,700 lx
+float RL_IlluminanceFromMagnitude(float m) { return pow(10.0, -0.4 * (m + 13.98)); }
+
+// Solar limb darkening (Hestroffer & Magnan 1998, ~550 nm): I(mu)/I(1) = 1 - u (1 - mu), u≈0.6
+float RL_SolarLimbDarkening(float rNorm)
+{
+    float mu = sqrt(max(1.0 - rNorm * rNorm, 0.0));
+    return 1.0 - 0.6 * (1.0 - mu);
+}
+// Baumbach (1937) K+F corona brightness relative to mean solar disc brightness, r in solar radii
+float RL_CoronaBrightness(float r)
+{
+    r = max(r, 1.0);
+    return 1e-6 * (0.0532 * pow(r, -2.5) + 1.425 * pow(r, -7.0) + 2.565 * pow(r, -17.0));
 }
 #endif
