@@ -41,6 +41,7 @@ namespace RealLife.Astronomy
         public double VisualMagnitude;
         public double BrightLimbAngleRad;   // position angle of bright limb, from north through east
         public Vec3d TopocentricUnitEnu;    // unit direction in local East-North-Up frame (geometric)
+        public MoonAspect Aspect;           // Moon only: libration, axis position angle, subsolar point
     }
 
     public static class SkyModel
@@ -63,6 +64,12 @@ namespace RealLife.Astronomy
         }
 
         /// <summary>Rotate ecliptic-of-date -> equatorial-of-date using the true obliquity.</summary>
+        public static Vec3d EquatorialToEclipticOfDate(Vec3d eq, double trueObliquity)
+        {
+            double c = Math.Cos(trueObliquity), s = Math.Sin(trueObliquity);
+            return new Vec3d(eq.X, eq.Y * c + eq.Z * s, -eq.Y * s + eq.Z * c);
+        }
+
         public static Vec3d EclipticToEquatorialOfDate(Vec3d ecl, double trueObliquity)
         {
             double c = Math.Cos(trueObliquity), s = Math.Sin(trueObliquity);
@@ -223,6 +230,13 @@ namespace RealLife.Astronomy
                 m.IlluminatedFraction = (1 + Math.Cos(m.PhaseAngle)) / 2;
                 m.BrightLimbAngleRad = BrightLimbPositionAngle(snap.Sun.RaRad, snap.Sun.DecRad, m.RaRad, m.DecRad);
                 m.VisualMagnitude = MoonMagnitude(m.PhaseAngle, tdist, sunDistKm);
+                // Orientation (libration) uses the TOPOCENTRIC ecliptic lon/lat (Meeus 53: "for a topocentric
+                // observer use topocentric coordinates") — parallax shifts libration by up to ~1°.
+                Vec3d topoEcl = EquatorialToEclipticOfDate(topo, snap.TrueObliquity);
+                topoEcl.ToSpherical(out double tlam, out double tbet);
+                Vec3d sunEcl = EquatorialToEclipticOfDate(sunDirEq, snap.TrueObliquity);
+                sunEcl.ToSpherical(out double slam, out _);
+                m.Aspect = MoonOrientation.Compute(snap.JdTt, tlam, tbet, m.RaRad, m.DecRad, slam, snap.Sun.DistanceAu, tdist);
                 snap.Moon = m;
             }
 
