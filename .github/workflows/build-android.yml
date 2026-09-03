@@ -22,6 +22,8 @@ jobs:
     name: Unity 6000.0.82f1 -> Android (IL2CPP ARM64+ARMv7)
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +47,7 @@ jobs:
             Library-Android-
 
       - name: Restore Android keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: env.HAS_KEYSTORE == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
