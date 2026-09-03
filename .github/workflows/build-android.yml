@@ -19,7 +19,7 @@ env:
 
 jobs:
   build:
-    name: Unity ${{ env.UNITY_VERSION }} -> Android (IL2CPP ARM64+ARMv7)
+    name: Unity 6000.0.82f1 -> Android (IL2CPP ARM64+ARMv7)
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -45,7 +45,7 @@ jobs:
             Library-Android-
 
       - name: Restore Android keystore
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
