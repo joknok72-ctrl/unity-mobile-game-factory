@@ -169,6 +169,11 @@ jobs:
           restore-keys: |
             ${{ steps.key.outputs.lib }}-
 
+      - name: Detect Library cache hit
+        id: libhit
+        run: |
+          if [ -d project/Library/Bee ] || [ -d project/Library/Artifacts ]; then echo "hit=true" >> "$GITHUB_OUTPUT"; echo "Library cache: HIT"; else echo "hit=false" >> "$GITHUB_OUTPUT"; echo "Library cache: miss"; fi
+
       - name: Install Unity + Android module
         uses: buildalon/unity-setup@v2
         with:
@@ -224,7 +229,7 @@ jobs:
       - name: Publish result to release
         if: always()
         env:
-          CACHE_HIT: ${{ steps.libcache.outputs.cache-matched-key != '' }}
+          CACHE_HIT: ${{ steps.libhit.outputs.hit }}
         run: |
           set +e
           OUT=$(find out -name '*.apk' -o -name '*.aab' 2>/dev/null | head -n 1)
