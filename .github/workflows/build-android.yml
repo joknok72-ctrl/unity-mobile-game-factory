@@ -48,6 +48,8 @@ jobs:
         with:
           version-file: ProjectSettings/ProjectVersion.txt
           build-targets: Android
+          # Workaround for buildalon/unity-setup#57: Hub >= 3.20 installs to /usr/bin, action expects /opt/unityhub
+          hub-version: '3.14.3'
           cache-installation: true
 
       - name: Activate Unity Personal license
