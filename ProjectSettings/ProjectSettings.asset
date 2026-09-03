@@ -12,8 +12,8 @@ PlayerSettings:
   targetDevice: 2
   useOnDemandResources: 0
   accelerometerFrequency: 60
-  companyName: RealLife Studio
-  productName: Real Life Sky
+  companyName: GameFactory
+  productName: Template Game
   defaultCursor: {fileID: 0}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
@@ -163,9 +163,9 @@ PlayerSettings:
   androidMaxAspectRatio: 2.4
   androidMinAspectRatio: 1
   applicationIdentifier:
-    Android: com.reallife.sky
-    Standalone: com.reallife.sky
-    iPhone: com.reallife.sky
+    Android: com.gamefactory.template
+    Standalone: com.gamefactory.template
+    iPhone: com.gamefactory.template
   buildNumber:
     Standalone: 0
     VisionOS: 0
@@ -559,7 +559,7 @@ PlayerSettings:
   logObjCUncaughtExceptions: 1
   enableCrashReportAPI: 0
   cameraUsageDescription: 
-  locationUsageDescription: Real Life Sky needs your position to draw the exact sky above you.
+  locationUsageDescription: 
   microphoneUsageDescription: 
   bluetoothUsageDescription: 
   macOSTargetOSVersion: 11.0
@@ -854,7 +854,7 @@ PlayerSettings:
   editorAssembliesCompatibilityLevel: 1
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: RealLifeSky
+  metroPackageName: TemplateGame
   metroPackageVersion: 
   metroCertificatePath: 
   metroCertificatePassword: 

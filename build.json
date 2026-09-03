@@ -1,0 +1,9 @@
+{
+  "productName": "Template Game",
+  "companyName": "GameFactory",
+  "packageName": "com.gamefactory.template",
+  "orientation": "Portrait",
+  "scenes": ["Assets/Scenes/Main.unity"],
+  "armv7": true,
+  "minSdk": 24
+}

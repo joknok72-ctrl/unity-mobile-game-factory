@@ -1,20 +1,30 @@
 name: Build Android APK
 
-# يبني الـ APK على GitHub بدون أي كمبيوتر:
-#   1) buildalon/unity-setup        → يثبّت Unity Hub + Unity 6000.0.82f1 + Android module على الـ runner
-#   2) buildalon/activate-unity-license → يفعّل ترخيص Personal أونلاين بالإيميل والباسورد فقط (لا يحتاج ملف .ulf)
-#   3) BuildScript.Build             → IL2CPP ARM64+ARMv7، توقيع بالـ keystore
-#   4) الـ APK يُنشر تلقائياً في Releases
+# Unity Mobile Game Factory — يبني أي لعبة Unity في هذا المستودع إلى APK تلقائياً عند كل push على main.
+#   1) buildalon/unity-setup            → يثبّت Unity (الإصدار من ProjectSettings/ProjectVersion.txt) + Android module
+#   2) buildalon/activate-unity-license → ترخيص Personal أونلاين (UNITY_EMAIL / UNITY_PASSWORD فقط، بدون ملف .ulf)
+#   3) BuildScript.Build                → IL2CPP ARM64(+ARMv7)، الاسم/الحزمة/المشاهد من build.json و ProjectSettings
+#   4) نشر الـ APK في Releases باسم اللعبة
 #
-# Secrets المطلوبة: UNITY_EMAIL, UNITY_PASSWORD (حساب Unity الذي تدخل به على cloud.unity.com)
-#                   + ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASS / ANDROID_KEYALIAS_NAME / ANDROID_KEYALIAS_PASS (مضافة).
+# Secrets المطلوبة (Settings → Secrets and variables → Actions):
+#   UNITY_EMAIL, UNITY_PASSWORD                                   ← إلزامية
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASS,
+#   ANDROID_KEYALIAS_NAME, ANDROID_KEYALIAS_PASS                  ← اختيارية (بدونها يُوقَّع بـ debug keystore، ويُثبَّت عادي)
 
 on:
   push:
     branches: [main]
     paths-ignore:
       - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      export_type:
+        description: 'androidPackage (APK) أو androidAppBundle (AAB لمتجر Google Play)'
+        default: androidPackage
+        type: choice
+        options: [androidPackage, androidAppBundle]
 
 permissions:
   contents: write
@@ -25,12 +35,13 @@ concurrency:
 
 jobs:
   build:
-    name: Unity 6000.0.82f1 -> Android (IL2CPP ARM64+ARMv7)
+    name: Unity -> Android (IL2CPP)
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
       BUILD_VERSION: 0.1.${{ github.run_number }}
+      EXPORT_TYPE: ${{ github.event.inputs.export_type || 'androidPackage' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,18 +54,27 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
+      - name: Read game name & Unity version
+        id: meta
+        run: |
+          NAME=$(python3 -c "import json,re;d=json.load(open('build.json')) if __import__('os').path.exists('build.json') else {};print(d.get('productName',''))" 2>/dev/null || true)
+          if [ -z "$NAME" ]; then NAME=$(grep -m1 '^  productName:' ProjectSettings/ProjectSettings.asset | sed 's/^  productName: //'); fi
+          SLUG=$(echo "$NAME" | sed 's/[^A-Za-z0-9]//g'); [ -n "$SLUG" ] || SLUG=Game
+          UV=$(grep -m1 'm_EditorVersion:' ProjectSettings/ProjectVersion.txt | awk '{print $2}')
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"; echo "slug=$SLUG" >> "$GITHUB_OUTPUT"; echo "unity=$UV" >> "$GITHUB_OUTPUT"
+          echo "Game: $NAME ($SLUG) — Unity $UV"
+
       - name: Check Unity account secrets
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
           if [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; then
-            echo "::error title=Unity secrets missing::أضف UNITY_EMAIL و UNITY_PASSWORD في Settings → Secrets and variables → Actions ثم أعد تشغيل الـ workflow (Run workflow)."
+            echo "::error title=Unity secrets missing::أضف UNITY_EMAIL و UNITY_PASSWORD في Settings → Secrets and variables → Actions ثم أعد تشغيل الـ workflow."
             exit 1
           fi
-          echo "Unity account secrets present."
 
-      - name: Install Unity 6000.0.82f1 + Android module
+      - name: Install Unity ${{ steps.meta.outputs.unity }} + Android module
         uses: buildalon/unity-setup@v2
         with:
           version-file: ProjectSettings/ProjectVersion.txt
@@ -83,10 +103,10 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/reallifesky.keystore"
-          echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/reallifesky.keystore" >> "$GITHUB_ENV"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
 
-      - name: Build APK (BuildScript.Build)
+      - name: Build (BuildScript.Build)
         uses: buildalon/unity-action@v3
         env:
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
@@ -100,25 +120,27 @@ jobs:
             -quit -batchmode -nographics
             -executeMethod BuildScript.Build
             -buildTarget Android
-            -customBuildPath ${{ github.workspace }}/build/Android/RealLifeSky.apk
+            -customBuildPath ${{ github.workspace }}/build/Android/${{ steps.meta.outputs.slug }}.apk
             -androidVersionCode ${{ github.run_number }}
             -buildVersion ${{ env.BUILD_VERSION }}
             -androidTargetSdkVersion 34
-            -androidExportType androidPackage
+            -androidExportType ${{ env.EXPORT_TYPE }}
 
-      - name: Locate APK
+      - name: Locate output
         id: apk
         run: |
-          APK=$(find build -name '*.apk' | head -n 1)
-          test -n "$APK" || { echo "No APK produced"; ls -R build || true; exit 1; }
-          cp "$APK" "RealLifeSky-v${BUILD_VERSION}.apk"
-          echo "path=RealLifeSky-v${BUILD_VERSION}.apk" >> "$GITHUB_OUTPUT"
-          ls -lh *.apk
+          OUT=$(find build -name '*.apk' -o -name '*.aab' | head -n 1)
+          test -n "$OUT" || { echo "::error::No APK/AAB produced"; ls -R build || true; exit 1; }
+          EXT="${OUT##*.}"
+          FILE="${{ steps.meta.outputs.slug }}-v${BUILD_VERSION}.${EXT}"
+          cp "$OUT" "$FILE"
+          echo "path=$FILE" >> "$GITHUB_OUTPUT"
+          ls -lh "$FILE"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RealLifeSky-Android
+          name: ${{ steps.meta.outputs.slug }}-Android
           path: ${{ steps.apk.outputs.path }}
           retention-days: 30
 
@@ -135,10 +157,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.BUILD_VERSION }}
-          name: Real Life Sky v${{ env.BUILD_VERSION }}
+          name: ${{ steps.meta.outputs.name }} v${{ env.BUILD_VERSION }}
           body: |
-            APK مبني تلقائياً من commit `${{ github.sha }}`.
-            Unity 6000.0.82f1 · URP 17 · IL2CPP ARM64+ARMv7 · Android 7.0+ (API 24).
-            حمّل ملف الـ APK بالأسفل وثبّته على الموبايل (فعّل "مصادر غير معروفة").
+            **${{ steps.meta.outputs.name }}** — مبني تلقائياً من commit `${{ github.sha }}`.
+            Unity ${{ steps.meta.outputs.unity }} · IL2CPP ARM64+ARMv7 · Android 7.0+ (API 24).
+            حمّل الملف بالأسفل وثبّته على الموبايل (فعّل "مصادر غير معروفة").
           files: ${{ steps.apk.outputs.path }}
           fail_on_unmatched_files: true
