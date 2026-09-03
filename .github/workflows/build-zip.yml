@@ -203,11 +203,11 @@ jobs:
             echo
             if [ -f upload/fatal.txt ]; then echo "FATAL: $(cat upload/fatal.txt) — الـ zip لا يحوي مجلد Assets/"; fi
             if [ -n "$LOG" ]; then
-              echo "--- C# compile errors ---";        grep -E "error CS[0-9]+" "$LOG" | sed 's/^.*Assets/Assets/' | sort -u | head -80
+              echo "--- C# compile errors ---";        grep -E "\(([0-9]+),([0-9]+)\): error CS[0-9]+" "$LOG" | sed 's/^.*Assets\//Assets\//' | sort -u | head -80
               echo "--- Shader errors ---";            grep -iE "Shader error|shader compiler|error X[0-9]+|Couldn't open include" "$LOG" | sort -u | head -40
-              echo "--- Missing / broken assets ---";  grep -iE "Could not find|is missing|Missing script|Broken text PPtr|Unknown package|cannot be found|not found" "$LOG" | sort -u | head -40
-              echo "--- Build pipeline ---";           grep -E "\[FactoryBuild\]|BuildFailedException|Build completed with a result|Error building Player|UnityException|Exception:|Gradle|FAILURE:|What went wrong" "$LOG" | sort -u | head -60
-              echo "--- Last 60 log lines ---";        tail -n 60 "$LOG"
+              echo "--- Missing / broken assets ---";  grep -iE "Could not find|is missing|Missing script|Broken text PPtr|Unknown package|cannot be found|not found" "$LOG" | grep -vE "Native extension|^-r:|\.ref\.dll|Bee/artifacts" | sort -u | head -40
+              echo "--- Build pipeline ---";           grep -E "\[FactoryBuild\]|BuildFailedException|Build completed with a result|Error building Player|UnityException|Exception:|FAILURE:|What went wrong|> Task .* FAILED|AAPT|Manifest merger" "$LOG" | grep -vE "^-r:|Bee/artifacts|MovedFromExtractor" | sort -u | head -60
+              echo "--- Last 60 relevant log lines ---"; grep -vE "^-r:|^-define:|^-analyzer:|Bee/artifacts|^\s*$" "$LOG" | tail -n 60
             else
               echo "(لم يُنتَج ملف log — غالباً فشلت خطوة سابقة: تثبيت Unity أو الترخيص أو فك الـ zip. راجع رابط الـ Run أعلاه)"
             fi
