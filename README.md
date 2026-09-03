@@ -57,11 +57,11 @@
 | `ANDROID_KEYALIAS_NAME` | `reallifesky` | ✅ مضافة |
 | `ANDROID_KEYALIAS_PASS` | كلمة مرور المفتاح | ✅ مضافة |
 
-**كيف تحصل على `UNITY_LICENSE` (Personal، مجاني):**
-1. من الموبايل افتح <https://license.unity3d.com/manual>.
-2. تحتاج ملف `.alf` — أسهل طريقة: شغّل workflow `game-ci/unity-request-activation-file` (أو اطلب منّي إضافته) وحمّل الـ `.alf` من Artifacts.
-3. ارفع `.alf` في الصفحة → اختر **Personal** → حمّل `.ulf`.
-4. افتح `.ulf` كنص وانسخ محتواه كله في Secret باسم `UNITY_LICENSE`.
+**كيف تحصل على `UNITY_LICENSE` (Personal، مجاني) من الموبايل فقط:**
+1. في المستودع: **Actions → «Request Unity activation file» → Run workflow**، انتظر دقائق ثم حمّل الـ Artifact (`Unity_v6000.0.82f1.alf`) وفكّ الضغط.
+2. افتح <https://license.unity3d.com/manual> وسجّل دخول بحساب Unity → ارفع ملف `.alf` → اختر **Unity Personal Edition** → حمّل ملف `.ulf`.
+3. افتح `.ulf` كنص (أي محرر ملفات) وانسخ محتواه **كله** في Secret باسم `UNITY_LICENSE`.
+4. أضف `UNITY_EMAIL` و`UNITY_PASSWORD` (نفس حساب Unity). ثم **Actions → Build Android APK → Run workflow**.
 
 بدون هذه الثلاثة سيفشل الـ workflow عند خطوة الترخيص — كل شيء آخر جاهز.
 
