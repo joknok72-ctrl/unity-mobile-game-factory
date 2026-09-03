@@ -43,6 +43,17 @@ namespace RealLife.Sky
             var bl = MakeText(btn.transform, "Label", Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, TextAnchor.MiddleCenter, 28);
             bl.text = "جيرو / لمس";
             btn.GetComponent<Button>().onClick.AddListener(() => { if (_cam != null) _cam.ToggleMode(); });
+
+            // Location button: re-asks for the Android permission / restarts the GPS (also opens app settings when permanently denied)
+            var locBtn = new GameObject("LocationButton", typeof(RectTransform), typeof(Image), typeof(Button));
+            locBtn.transform.SetParent(canvasGo.transform, false);
+            var lrt = locBtn.GetComponent<RectTransform>(); lrt.anchorMin = new Vector2(0, 0); lrt.anchorMax = new Vector2(0, 0);
+            lrt.anchoredPosition = new Vector2(340, 110); lrt.sizeDelta = new Vector2(200, 80);
+            locBtn.GetComponent<Image>().color = new Color(1, 1, 1, 0.12f);
+            var ll = MakeText(locBtn.transform, "Label", Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, TextAnchor.MiddleCenter, 28);
+            ll.text = "📍 الموقع";
+            locBtn.GetComponent<Button>().onClick.AddListener(() => { if (GeoLocation.Instance != null) GeoLocation.Instance.Retry(); });
+
             _cam = Camera.main != null ? Camera.main.GetComponent<SkyCamera>() : null;
         }
 
@@ -73,6 +84,7 @@ namespace RealLife.Sky
             sb.Append(FormatLatLon(geo.LatitudeDeg, geo.LongitudeDeg)).Append($"  ↕{geo.AltitudeM:F0}m");
             sb.Append(geo.State == GeoLocation.FixState.Fixed ? $"  📍GPS ±{geo.HorizontalAccuracyM:F0}m" : geo.State == GeoLocation.FixState.Stored ? "  📍آخر موقع محفوظ" : geo.State == GeoLocation.FixState.Denied ? "  📍بدون إذن الموقع" : "  📍جارٍ تحديد الموقع…").Append('\n');
             if (_cam != null) sb.Append($"الاتجاه {_cam.HeadingDeg:F1}° {Cardinal(_cam.HeadingDeg)}   الارتفاع {_cam.PitchDeg:F1}°   {(_cam.mode == SkyCamera.Mode.Gyro ? "جيروسكوب" : "لمس")}\n");
+            if (Bootstrap.MissingShaders.Length > 0) sb.Append("⚠ شيدر مفقود: ").Append(Bootstrap.MissingShaders).Append('\n');
             _top.text = sb.ToString();
 
             sb.Clear();

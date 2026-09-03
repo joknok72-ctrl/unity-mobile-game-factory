@@ -44,21 +44,57 @@ namespace RealLife.Sky
             }
         }
 
-        void Start() { StartCoroutine(AcquireLocation()); }
+        Coroutine _acquire;
+        void Start() { Retry(); }
+
+        /// <summary>Re-run the permission request + GPS start (bound to the HUD "الموقع" button).</summary>
+        public void Retry()
+        {
+            if (_acquire != null) StopCoroutine(_acquire);
+            _acquire = StartCoroutine(AcquireLocation());
+        }
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        static bool HasAnyLocationPermission =>
+            Permission.HasUserAuthorizedPermission(Permission.FineLocation) || Permission.HasUserAuthorizedPermission(Permission.CoarseLocation);
+        bool _permanentlyDenied;
+
+        static void OpenAppSettings()
+        {
+            // The user ticked "don't ask again": the only way to grant the permission is the system settings page of this app.
+            try
+            {
+                using (var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+                using (var uriClass = new AndroidJavaClass("android.net.Uri"))
+                using (var uri = uriClass.CallStatic<AndroidJavaObject>("fromParts", "package", Application.identifier, null))
+                using (var intent = new AndroidJavaObject("android.content.Intent", "android.settings.APPLICATION_DETAILS_SETTINGS", uri))
+                    activity.Call("startActivity", intent);
+            }
+            catch (Exception e) { Debug.LogWarning("[RealLifeSky] cannot open app settings: " + e.Message); }
+        }
+#endif
 
         IEnumerator AcquireLocation()
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
-            if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
+            if (!HasAnyLocationPermission)
             {
+                if (_permanentlyDenied) { OpenAppSettings(); _permanentlyDenied = false; yield return new WaitForSeconds(1f); }
                 State = FixState.RequestingPermission;
-                Permission.RequestUserPermission(Permission.FineLocation);
+                bool answered = false;
+                var cb = new PermissionCallbacks();
+                cb.PermissionGranted += _ => answered = true;
+                cb.PermissionDenied += _ => answered = true;
+                cb.PermissionDeniedAndDontAskAgain += _ => { answered = true; _permanentlyDenied = true; };
+                Permission.RequestUserPermissions(new[] { Permission.FineLocation, Permission.CoarseLocation }, cb);
                 float t = 0;
-                while (!Permission.HasUserAuthorizedPermission(Permission.FineLocation) && t < 30f) { t += Time.unscaledDeltaTime; yield return null; }
-                if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation)) { State = HasFix ? FixState.Stored : FixState.Denied; yield break; }
+                while (!answered && !HasAnyLocationPermission && t < 60f) { t += Time.unscaledDeltaTime; yield return null; }
+                if (!HasAnyLocationPermission) { State = HasFix ? FixState.Stored : FixState.Denied; yield break; }
             }
 #endif
             if (!Input.location.isEnabledByUser) { State = HasFix ? FixState.Stored : FixState.Denied; yield break; }
+            if (Input.location.status == LocationServiceStatus.Running || Input.location.status == LocationServiceStatus.Initializing) Input.location.Stop();
             State = FixState.Starting;
             Input.location.Start(5f, 10f); // desired accuracy 5 m, update every 10 m
             Input.compass.enabled = true;
