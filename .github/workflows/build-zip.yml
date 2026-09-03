@@ -76,7 +76,20 @@ jobs:
           # unzip (fall back to python for odd archives)
           unzip -q -o upload/project.zip -d upload/x || python3 -c "import zipfile;zipfile.ZipFile('upload/project.zip').extractall('upload/x')"
           # Project root = the shallowest directory that contains an Assets/ folder (ignore Library/Temp junk)
-          ROOT=$(find upload/x -maxdepth 4 -type d -name Assets -not -path '*/Library/*' -not -path '*/__MACOSX/*' | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2- | xargs -r dirname)
+          # (Python: robust with spaces/Arabic/unicode in folder names)
+          ROOT=$(python3 - <<'EOF'
+          import os
+          best=None
+          for dp,dns,fns in os.walk('upload/x'):
+              rel=os.path.relpath(dp,'upload/x')
+              if rel.count(os.sep)>4: dns[:]=[]; continue
+              if any(x in dp for x in ('/Library','/__MACOSX','/Temp')): dns[:]=[]; continue
+              if 'Assets' in dns:
+                  cand=dp
+                  if best is None or len(cand)<len(best): best=cand
+          print(best or '')
+          EOF
+          )
           if [ -z "$ROOT" ]; then
             echo "::error::لم أجد مجلد Assets داخل الـ zip. يجب أن يحوي الـ zip مجلد مشروع Unity (Assets/ و ProjectSettings/ و Packages/)."
             echo "NO_ASSETS_FOLDER" > upload/fatal.txt
