@@ -105,3 +105,7 @@ ProjectSettings/                   Unity 6000.0.82f1 · Android · IL2CPP · Lin
 ---
 **التقنيات:** Unity 6000.0.82f1 LTS · URP 17.0.4 · C# · HLSL · GameCI v4 · IL2CPP  
 **آخر تحديث:** 2026-09-03
+
+## سجل الإصلاحات على الجهاز
+- **v0.1.12** — إصلاح الشاشة البنفسجية (Magenta): كانت الأرض تستخدم `Shader.Find("Universal Render Pipeline/Lit")` وهو شيدر يُحذف من البناء لأنه لا توجد مادة (Material) تشير إليه، فيُعيد `null` وتُرسم كل الأسطح بالبنفسجي. الحل: شيدر خاص `RealLife/Ground` (Lambert فوتومتري) داخل `Resources/Shaders`، وإضافة كل شيدرات RealLife إلى **Always Included Shaders**، وحُرّاس `RequireShader` يعرضون في الـHUD أي شيدر مفقود.
+- **v0.1.12** — إذن الموقع: طلب `FINE + COARSE` بواجهة `PermissionCallbacks`، زر **📍 الموقع** في الـHUD يعيد الطلب (ويفتح إعدادات التطبيق عند «عدم السؤال مرة أخرى»)، وملف `Assets/Plugins/Android/RealLifePermissions.androidlib/AndroidManifest.xml` يُصرّح بالأذونات صراحةً.
