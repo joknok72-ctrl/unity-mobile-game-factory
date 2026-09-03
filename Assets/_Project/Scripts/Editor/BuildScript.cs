@@ -87,13 +87,15 @@ public static class BuildScript
         }
 
         // Keystore (GameCI passes these when secrets exist; otherwise Unity's debug keystore signs the APK — still installable)
-        if (args.TryGetValue("androidKeystoreName", out var ks) && !string.IsNullOrEmpty(ks) && File.Exists(ks))
+        // Values come from -args (GameCI style) or from environment variables (keeps passwords out of the command line).
+        string ks = Arg(args, "androidKeystoreName", "ANDROID_KEYSTORE_PATH");
+        if (!string.IsNullOrEmpty(ks) && File.Exists(ks))
         {
             PlayerSettings.Android.useCustomKeystore = true;
             PlayerSettings.Android.keystoreName = ks;
-            PlayerSettings.Android.keystorePass = args.TryGetValue("androidKeystorePass", out var kp) ? kp : "";
-            PlayerSettings.Android.keyaliasName = args.TryGetValue("androidKeyaliasName", out var ka) ? ka : "";
-            PlayerSettings.Android.keyaliasPass = args.TryGetValue("androidKeyaliasPass", out var kap) ? kap : "";
+            PlayerSettings.Android.keystorePass = Arg(args, "androidKeystorePass", "ANDROID_KEYSTORE_PASS");
+            PlayerSettings.Android.keyaliasName = Arg(args, "androidKeyaliasName", "ANDROID_KEYALIAS_NAME");
+            PlayerSettings.Android.keyaliasPass = Arg(args, "androidKeyaliasPass", "ANDROID_KEYALIAS_PASS");
             Console.WriteLine("[BuildScript] custom keystore applied");
         }
         else
@@ -104,6 +106,12 @@ public static class BuildScript
         EditorUserBuildSettings.buildAppBundle = args.TryGetValue("androidExportType", out var et) && et == "androidAppBundle";
         EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
         AssetDatabase.SaveAssets();
+    }
+
+    static string Arg(Dictionary<string, string> args, string key, string envName)
+    {
+        if (args.TryGetValue(key, out var v) && !string.IsNullOrEmpty(v)) return v;
+        return Environment.GetEnvironmentVariable(envName) ?? "";
     }
 
     /// <summary>Guarantee the scene exists and is in the build list (it only needs the Bootstrap object).</summary>

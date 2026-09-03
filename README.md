@@ -37,33 +37,29 @@
 
 ---
 
-## ⚙️ البناء التلقائي (GitHub Actions + GameCI)
+## ⚙️ البناء التلقائي (GitHub Actions + Buildalon)
 
 الملف: [`.github/workflows/build-android.yml`](.github/workflows/build-android.yml)
 
-- **`game-ci/unity-builder@v4`** بصورة `unityci/editor:ubuntu-6000.0.82f1-android-3`.
-- **`buildMethod: BuildScript.Build`** → [`Assets/_Project/Scripts/Editor/BuildScript.cs`](Assets/_Project/Scripts/Editor/BuildScript.cs) يضبط IL2CPP، ARM64+ARMv7، minSdk 24 / targetSdk 34، Vulkan+GLES3، Portrait، التوقيع، ثم `BuildPipeline.BuildPlayer`.
+- **`buildalon/unity-setup@v2`** يثبّت Unity Hub + Unity 6000.0.82f1 + Android module على runner لينكس.
+- **`buildalon/activate-unity-license@v2`** يفعّل ترخيص **Personal أونلاين** بحساب Unity (إيميل + باسورد) — **لا يحتاج ملف `.ulf` ولا كمبيوتر** (صفحة التفعيل اليدوي `license.unity3d.com/manual` أصبحت لعملاء Enterprise فقط).
+- **`buildalon/unity-action@v3`** يشغّل `-executeMethod BuildScript.Build` → [`Assets/_Project/Scripts/Editor/BuildScript.cs`](Assets/_Project/Scripts/Editor/BuildScript.cs) يضبط IL2CPP، ARM64+ARMv7، minSdk 24 / targetSdk 34، Vulkan+GLES3، Portrait، التوقيع، ثم `BuildPipeline.BuildPlayer`.
 - الناتج يُرفع كـ **Artifact** ويُنشر تلقائياً في **Releases** بعلامة `v0.1.<run_number>`.
 
-### الـ Secrets المطلوبة في المستودع (Settings → Secrets and variables → Actions)
+### الـ Secrets المطلوبة (Settings → Secrets and variables → Actions)
 
 | Secret | القيمة | من يضيفها |
 |---|---|---|
-| `UNITY_EMAIL` | بريد حساب Unity | **أنت** |
+| `UNITY_EMAIL` | إيميل حساب Unity (نفس حساب cloud.unity.com) | **أنت** |
 | `UNITY_PASSWORD` | كلمة مرور حساب Unity | **أنت** |
-| `UNITY_LICENSE` | محتوى ملف `Unity_v6000.x.ulf` (ترخيص Personal) | **أنت** |
 | `ANDROID_KEYSTORE_BASE64` | keystore مُرمَّز base64 | ✅ مضافة |
 | `ANDROID_KEYSTORE_PASS` | كلمة مرور الـ keystore | ✅ مضافة |
 | `ANDROID_KEYALIAS_NAME` | `reallifesky` | ✅ مضافة |
 | `ANDROID_KEYALIAS_PASS` | كلمة مرور المفتاح | ✅ مضافة |
 
-**كيف تحصل على `UNITY_LICENSE` (Personal، مجاني) من الموبايل فقط:**
-1. في المستودع: **Actions → «Request Unity activation file» → Run workflow**، انتظر دقائق ثم حمّل الـ Artifact (`Unity_v6000.0.82f1.alf`) وفكّ الضغط.
-2. افتح <https://license.unity3d.com/manual> وسجّل دخول بحساب Unity → ارفع ملف `.alf` → اختر **Unity Personal Edition** → حمّل ملف `.ulf`.
-3. افتح `.ulf` كنص (أي محرر ملفات) وانسخ محتواه **كله** في Secret باسم `UNITY_LICENSE`.
-4. أضف `UNITY_EMAIL` و`UNITY_PASSWORD` (نفس حساب Unity). ثم **Actions → Build Android APK → Run workflow**.
+> **ملاحظة مهمة:** لو حسابك على Unity مفعَّل فيه التحقق بخطوتين (2FA)، عطّله مؤقتاً من <https://id.unity.com> → Security، أو أنشئ حساب Unity جديداً مخصصاً للبناء (مجاني) واستخدمه في الـ Secrets. التفعيل الآلي لا يستطيع إدخال كود 2FA.
 
-بدون هذه الثلاثة سيفشل الـ workflow عند خطوة الترخيص — كل شيء آخر جاهز.
+بعد إضافة الـ Secret-ين: **Actions → Build Android APK → Run workflow** (أول بناء ~40–60 دقيقة لأنه يحمّل Unity؛ البناءات التالية أسرع بسبب الـ cache).
 
 ---
 

@@ -1,5 +1,14 @@
 name: Build Android APK
 
+# يبني الـ APK على GitHub بدون أي كمبيوتر:
+#   1) buildalon/unity-setup        → يثبّت Unity Hub + Unity 6000.0.82f1 + Android module على الـ runner
+#   2) buildalon/activate-unity-license → يفعّل ترخيص Personal أونلاين بالإيميل والباسورد فقط (لا يحتاج ملف .ulf)
+#   3) BuildScript.Build             → IL2CPP ARM64+ARMv7، توقيع بالـ keystore
+#   4) الـ APK يُنشر تلقائياً في Releases
+#
+# Secrets المطلوبة: UNITY_EMAIL, UNITY_PASSWORD (حساب Unity الذي تدخل به على cloud.unity.com)
+#                   + ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASS / ANDROID_KEYALIAS_NAME / ANDROID_KEYALIAS_PASS (مضافة).
+
 on:
   push:
     branches: [main]
@@ -14,29 +23,39 @@ concurrency:
   group: android-build-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  UNITY_VERSION: 6000.0.82f1
-
 jobs:
   build:
     name: Unity 6000.0.82f1 -> Android (IL2CPP ARM64+ARMv7)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      BUILD_VERSION: 0.1.${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           lfs: true
-          fetch-depth: 0
 
-      # The unityci/editor image is ~8 GB; reclaim disk on the runner first.
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules
           sudo docker image prune --all --force || true
           df -h /
+
+      - name: Install Unity 6000.0.82f1 + Android module
+        uses: buildalon/unity-setup@v2
+        with:
+          version-file: ProjectSettings/ProjectVersion.txt
+          build-targets: Android
+          cache-installation: true
+
+      - name: Activate Unity Personal license
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_EMAIL }}
+          password: ${{ secrets.UNITY_PASSWORD }}
 
       - name: Cache Unity Library
         uses: actions/cache@v4
@@ -52,39 +71,35 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/reallifesky.keystore"
-          echo "KEYSTORE_FILE=reallifesky.keystore" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/reallifesky.keystore" >> "$GITHUB_ENV"
 
-      - name: Build with GameCI unity-builder
-        uses: game-ci/unity-builder@v4
+      - name: Build APK (BuildScript.Build)
+        uses: buildalon/unity-action@v3
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEYALIAS_NAME: ${{ secrets.ANDROID_KEYALIAS_NAME }}
+          ANDROID_KEYALIAS_PASS: ${{ secrets.ANDROID_KEYALIAS_PASS }}
         with:
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: Android
-          buildName: RealLifeSky
-          buildsPath: build
-          buildMethod: BuildScript.Build
-          androidExportType: androidPackage
-          androidTargetSdkVersion: AndroidApiLevel34
-          androidKeystoreName: ${{ env.KEYSTORE_FILE }}
-          androidKeystorePass: ${{ secrets.ANDROID_KEYSTORE_PASS }}
-          androidKeyaliasName: ${{ secrets.ANDROID_KEYALIAS_NAME }}
-          androidKeyaliasPass: ${{ secrets.ANDROID_KEYALIAS_PASS }}
-          androidVersionCode: ${{ github.run_number }}
-          versioning: Custom
-          version: 0.1.${{ github.run_number }}
-          allowDirtyBuild: true
+          project-path: ${{ github.workspace }}
+          build-target: Android
+          log-name: Android-Build
+          args: >-
+            -quit -batchmode -nographics
+            -executeMethod BuildScript.Build
+            -buildTarget Android
+            -customBuildPath ${{ github.workspace }}/build/Android/RealLifeSky.apk
+            -androidVersionCode ${{ github.run_number }}
+            -buildVersion ${{ env.BUILD_VERSION }}
+            -androidTargetSdkVersion 34
+            -androidExportType androidPackage
 
       - name: Locate APK
         id: apk
         run: |
           APK=$(find build -name '*.apk' | head -n 1)
-          test -n "$APK" || { echo "No APK produced"; ls -R build; exit 1; }
-          sudo chown -R "$USER" build
-          cp "$APK" "RealLifeSky-v0.1.${{ github.run_number }}.apk"
-          echo "path=RealLifeSky-v0.1.${{ github.run_number }}.apk" >> "$GITHUB_OUTPUT"
+          test -n "$APK" || { echo "No APK produced"; ls -R build || true; exit 1; }
+          cp "$APK" "RealLifeSky-v${BUILD_VERSION}.apk"
+          echo "path=RealLifeSky-v${BUILD_VERSION}.apk" >> "$GITHUB_OUTPUT"
           ls -lh *.apk
 
       - name: Upload artifact
@@ -94,15 +109,23 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
           retention-days: 30
 
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-logs
+          path: '**/*.log'
+          if-no-files-found: ignore
+
       - name: Publish GitHub Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.${{ github.run_number }}
-          name: Real Life Sky v0.1.${{ github.run_number }}
+          tag_name: v${{ env.BUILD_VERSION }}
+          name: Real Life Sky v${{ env.BUILD_VERSION }}
           body: |
             APK مبني تلقائياً من commit `${{ github.sha }}`.
-            Unity ${{ env.UNITY_VERSION }} · URP 17 · IL2CPP ARM64+ARMv7 · Android 7.0+ (API 24).
+            Unity 6000.0.82f1 · URP 17 · IL2CPP ARM64+ARMv7 · Android 7.0+ (API 24).
             حمّل ملف الـ APK بالأسفل وثبّته على الموبايل (فعّل "مصادر غير معروفة").
           files: ${{ steps.apk.outputs.path }}
           fail_on_unmatched_files: true
