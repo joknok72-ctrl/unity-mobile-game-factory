@@ -28,7 +28,7 @@
 
 ## 📦 تنزيل الـ APK
 
-**أحدث إصدار:** <https://github.com/joknok72-ctrl/real-life-sky/releases/latest> — ✅ أول بناء ناجح v0.1.10 (37 MB)
+**أحدث إصدار:** <https://github.com/joknok72-ctrl/real-life-sky/releases/latest> — ✅ بناء ناجح (~35 MB)
 
 1. افتح تبويب **Releases** في هذا المستودع.
 2. حمّل `RealLifeSky-v0.1.N.apk` من آخر إصدار.
