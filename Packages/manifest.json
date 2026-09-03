@@ -2,7 +2,6 @@
   "dependencies": {
     "com.unity.inputsystem": "1.11.2",
     "com.unity.render-pipelines.universal": "17.0.4",
-    "com.unity.textmeshpro": "3.0.6",
     "com.unity.ugui": "2.0.0",
     "com.unity.modules.androidjni": "1.0.0",
     "com.unity.modules.animation": "1.0.0",
