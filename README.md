@@ -38,7 +38,22 @@
 
 ### لو الـ AI شغّال في نفس منصة Genspark
 ممكن يرفع الـ zip بنفسه على تطبيق البناء عبر API:
-`curl -F "file=@Game.zip" -F "name=Game" -H "X-PIN: <PIN>" https://<app>.pages.dev/api/upload`
+`curl -F "file=@Game.zip" -F "name=Game" -F "profile=fast" -H "X-PIN: <PIN>" https://<app>.pages.dev/api/upload`
+
+## أنماط البناء (profile)
+| | `fast` (الافتراضي) | `release` |
+|---|---|---|
+| المعالجات | ARM64 فقط | ARM64 + ARMv7 |
+| IL2CPP | Debug · OptimizeSize · stripping Low | Release · OptimizeSpeed · stripping Medium |
+| Burst AOT | معطّل | مفعّل |
+| الوقت التقريبي | ~8–10 دقيقة (أقل مع الكاش) | ~15–18 دقيقة |
+| الاستخدام | تجربة على الموبايل | النشر / المتجر (AAB دائماً release) |
+
+المصنع يحفظ مجلد `Library` في كاش GitHub Actions (مفتاح = profile + hash لـ manifest.json/ProjectVersion.txt) فتُسرّع البناءات التالية لنفس الحزم. ويبلّغ التقدم (`step`/`percent`) وإحصاءات النتيجة (`errors`/`warnings`/`fixes`/`duration`) في body الـ release.
+
+### إصلاح تلقائي (FactoryBuild.FixRenderPipeline)
+- URP asset بدون Renderer ← يُنشأ `Factory_AutoRenderer.asset` ويُسند.
+- GraphicsSettings بدون pipeline مع وجود URP ← يُسند أول URP asset.
 
 ## ماذا يحدث داخل المصنع؟
 - `build-zip.yml`: يستقبل الـ zip من التطبيق، يدمج ملفات المصنع (سكربت البناء، إعدادات URP، إصدار Unity)، يبني، ويرجّع APK أو `error.txt`.
