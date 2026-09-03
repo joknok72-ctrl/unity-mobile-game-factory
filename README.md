@@ -11,30 +11,44 @@
 
 ---
 
-## كيف أطلب لعبة جديدة؟ (انسخ هذه الرسالة في محادثة جديدة)
+## طريقة العمل (الأسهل) — zip ← التطبيق ← APK
+1. في محادثة جديدة مع أي AI انسخ الرسالة أدناه. الـ AI يسلّمك **ملف `.zip` واحد** فيه مشروع اللعبة كامل.
+2. ارفع الـ zip على **تطبيق البناء** (رابطك على Cloudflare Pages) → يبدأ البناء فوراً.
+3. بعد ~10–13 دقيقة: ✅ نجح → زر تحميل APK · ❌ فشل → زر «انسخ الخطأ» → ابعته للـ AI → يرجّع لك zip جديد.
 
+> الـ AI **لا يلمس هذا المستودع أبداً**. المستودع هو المصنع فقط (خط الإنتاج + القالب + القواعد).
+
+### الرسالة التي تنسخها للـ AI في محادثة جديدة
 ```
-اقرأ أولاً ملف FACTORY_RULES.md في المستودع:
-https://github.com/joknok72-ctrl/unity-mobile-game-factory
-ثم ابنِ Full Project لعبة Unity 3D للموبايل (Android فقط) بعنوان: <اسم اللعبة>
+ابنِ لي Full Project لعبة Unity 3D للموبايل (Android فقط) بعنوان: <اسم اللعبة>
 الفكرة: <وصف اللعبة>
-- التزم بكل قواعد FACTORY_RULES.md (Unity 6000.0.82f1، URP، Legacy Input، .meta لكل ملف، لا Shader.Find لشيدرات URP، HUD تشخيصي).
-- حدّث build.json (الاسم، com.<studio>.<game>، الاتجاه، المشاهد).
-- تحقق من الكود محلياً (mono-mcs) قبل الرفع.
-- ارفع على branch main في نفس المستودع، انتظر البناء، وتأكد أن الـ APK ظهر في Releases.
-- بعد ذلك اطلب مني سكرين شوت من اللعبة وأصلح أي مشكلة تظهر.
+
+المتطلبات الإلزامية:
+- المحرك: Unity 6000.0.82f1 LTS مع URP 17.0.4، uGUI، Legacy Input فقط (لا Input System)، IL2CPP ARM64+ARMv7.
+- اقرأ والتزم بكل قواعد هذا الملف قبل أي شيء:
+  https://raw.githubusercontent.com/joknok72-ctrl/unity-mobile-game-factory/main/FACTORY_RULES.md
+- ابدأ من القالب الجاهز (نزّله كـ zip):
+  https://github.com/joknok72-ctrl/unity-mobile-game-factory/archive/refs/heads/main.zip
+  واستبدل Assets/Scenes و Assets/Scripts و Assets/Resources و build.json بمحتوى اللعبة.
+- لا تعدّل ولا ترفع أي شيء على GitHub. الناتج المطلوب هو ملف zip واحد فقط فيه:
+  Assets/ و Packages/manifest.json و ProjectSettings/ و build.json (بدون Library أو Temp أو .git).
+- كل ملف له .meta، تحقق من الكود محلياً (mono-mcs) قبل التسليم، لا Shader.Find لشيدرات URP، وأضف HUD نصي تشخيصي.
+- أعطني رابط تحميل الـ zip. لو رجعت لك بنص خطأ من البناء، أصلحه وسلّمني zip جديد كامل.
 ```
 
-## ماذا يحدث بعد الرفع؟
-1. أي `push` على `main` يشغّل `.github/workflows/build-android.yml`.
-2. يثبّت Unity + Android module، يفعّل الترخيص، يبني بـ `BuildScript.Build`.
-3. بعد ~10–13 دقيقة تجد الإصدار في: `https://github.com/joknok72-ctrl/unity-mobile-game-factory/releases/latest`
-4. ثبّت الـ APK على الموبايل (فعّل "مصادر غير معروفة").
+### لو الـ AI شغّال في نفس منصة Genspark
+ممكن يرفع الـ zip بنفسه على تطبيق البناء عبر API:
+`curl -F "file=@Game.zip" -F "name=Game" -H "X-PIN: <PIN>" https://<app>.pages.dev/api/upload`
+
+## ماذا يحدث داخل المصنع؟
+- `build-zip.yml`: يستقبل الـ zip من التطبيق، يدمج ملفات المصنع (سكربت البناء، إعدادات URP، إصدار Unity)، يبني، ويرجّع APK أو `error.txt`.
+- `build-android.yml`: أي `push` على `main` يبني القالب نفسه (للتأكد أن خط الإنتاج سليم).
 
 ## بنية المستودع
 ```
-.github/workflows/build-android.yml   ← خط الإنتاج (لا يُعدَّل لكل لعبة)
-Assets/Editor/BuildScript.cs          ← سكربت البناء العام (لا يُعدَّل لكل لعبة)
+.github/workflows/build-zip.yml       ← بناء الـ zip المرفوع من التطبيق
+.github/workflows/build-android.yml   ← بناء القالب عند أي push
+Assets/FactoryEditor/FactoryBuild.cs  ← سكربت البناء العام (يُدمَج تلقائياً في كل zip)
 Assets/Settings/                      ← إعدادات URP للموبايل
 Assets/Scenes/Main.unity              ← مشهد قالب (مكعب يدور) — يُستبدل باللعبة
 Assets/Scripts/TemplateBootstrap.cs   ← سكربت القالب — يُستبدل باللعبة
@@ -62,10 +76,11 @@ FACTORY_RULES.md                      ← القواعد الإلزامية
 | `UNITY_EMAIL` / `UNITY_PASSWORD` | حساب Unity (cloud.unity.com) — تفعيل الترخيص Personal. لو فعّلت التحقق بخطوتين (2FA) على الحساب سيفشل التفعيل |
 | `ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASS` / `ANDROID_KEYALIAS_NAME` / `ANDROID_KEYALIAS_PASS` | توقيع الـ APK (نفس المفتاح لكل الألعاب حتى تُحدَّث التثبيتات فوق بعضها) |
 
-## تشغيل يدوي
+## تشغيل يدوي للقالب
 Actions → **Build Android APK** → Run workflow → اختر `androidPackage` (APK) أو `androidAppBundle` (AAB للمتجر).
 
 ## الحالة
 - ✅ خط الإنتاج مُجرَّب: عدة إصدارات بُنيت ونُشرت وثُبِّتت على جهاز حقيقي.
 - ✅ المشروع الحالي قالب فارغ (مكعب يدور + نص) للتأكد من أن كل شيء يعمل.
-- 🔜 اللعبة القادمة تُبنى فوق هذا القالب في محادثة جديدة.
+- ✅ تطبيق البناء (zip → APK) على Cloudflare Pages.
+- 🔜 كل لعبة جديدة = zip من محادثة AI جديدة → التطبيق.

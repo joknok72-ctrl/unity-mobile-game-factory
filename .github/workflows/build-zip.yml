@@ -1,0 +1,246 @@
+name: Build uploaded project (zip)
+
+# يُشغَّل من تطبيق "مصنع الألعاب" (repository_dispatch) بعد رفع ملف zip لمشروع Unity.
+# الـ zip يُخزَّن كـ asset في Release مسوَّدة (draft) tag = build-<id>. هذا الـ workflow:
+#   1) يحمّل الـ zip ويفكّه، ويحدد جذر المشروع (المجلد الذي يحوي Assets/)
+#   2) يدمج ملفات المصنع (FactoryEditor، ProjectVersion، ProjectSettings/Packages إن كانت ناقصة) ويصلح الإعدادات الشائعة
+#   3) يبني APK بـ FactoryBuild.Build
+#   4) يرفع APK (أو error.txt عند الفشل) إلى نفس الـ Release ويحدّث حالته في body (JSON)
+
+on:
+  repository_dispatch:
+    types: [build-zip]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zip-build-${{ github.event.client_payload.build_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ github.event.client_payload.name }} (${{ github.event.client_payload.build_id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILD_ID: ${{ github.event.client_payload.build_id }}
+      RELEASE_ID: ${{ github.event.client_payload.release_id }}
+      ASSET_ID: ${{ github.event.client_payload.asset_id }}
+      GAME_NAME: ${{ github.event.client_payload.name }}
+      EXPORT_TYPE: ${{ github.event.client_payload.export_type || 'androidPackage' }}
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - name: Checkout factory
+        uses: actions/checkout@v4
+        with:
+          path: factory
+
+      - name: Mark release as building
+        run: |
+          python3 - <<'EOF'
+          import json, os, urllib.request
+          body = json.dumps({"status":"building","build_id":os.environ["BUILD_ID"],"name":os.environ["GAME_NAME"],
+                             "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+                             "started": __import__('datetime').datetime.utcnow().isoformat()+"Z"}, ensure_ascii=False)
+          req = urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/{os.environ['RELEASE_ID']}",
+                                       data=json.dumps({"body": body}).encode(), method="PATCH",
+                                       headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"})
+          urllib.request.urlopen(req).read()
+          EOF
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Download & extract project zip
+        run: |
+          mkdir -p upload project
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+            -o upload/project.zip "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$ASSET_ID"
+          ls -lh upload/project.zip
+          # unzip (fall back to python for odd archives)
+          unzip -q -o upload/project.zip -d upload/x || python3 -c "import zipfile;zipfile.ZipFile('upload/project.zip').extractall('upload/x')"
+          # Project root = the shallowest directory that contains an Assets/ folder (ignore Library/Temp junk)
+          ROOT=$(find upload/x -maxdepth 4 -type d -name Assets -not -path '*/Library/*' -not -path '*/__MACOSX/*' | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2- | xargs -r dirname)
+          if [ -z "$ROOT" ]; then
+            echo "::error::لم أجد مجلد Assets داخل الـ zip. يجب أن يحوي الـ zip مجلد مشروع Unity (Assets/ و ProjectSettings/ و Packages/)."
+            echo "NO_ASSETS_FOLDER" > upload/fatal.txt
+            find upload/x -maxdepth 3 | head -50
+            exit 1
+          fi
+          echo "Project root: $ROOT"
+          shopt -s dotglob
+          cp -a "$ROOT"/* project/
+          rm -rf project/Library project/Temp project/Logs project/obj project/Build project/build project/.git project/UserSettings
+          echo "PROJECT_DIR=$GITHUB_WORKSPACE/project" >> "$GITHUB_ENV"
+          du -sh project
+
+      - name: Merge factory files & fix settings
+        run: |
+          set -e
+          cd project
+          F="$GITHUB_WORKSPACE/factory"
+          mkdir -p Assets ProjectSettings Packages
+          # 1) Build script (always ours)
+          rm -rf Assets/FactoryEditor Assets/FactoryEditor.meta
+          cp -a "$F/Assets/FactoryEditor" Assets/FactoryEditor && cp "$F/Assets/FactoryEditor.meta" Assets/FactoryEditor.meta
+          # 2) Project settings: copy any file that is missing; force our Unity version
+          COPIED_SETTINGS=0
+          for f in "$F"/ProjectSettings/*; do b=$(basename "$f"); if [ ! -e "ProjectSettings/$b" ]; then cp "$f" "ProjectSettings/$b"; COPIED_SETTINGS=1; echo "  + ProjectSettings/$b (from factory)"; fi; done
+          cp "$F/ProjectSettings/ProjectVersion.txt" ProjectSettings/ProjectVersion.txt
+          # 3) Packages
+          if [ ! -f Packages/manifest.json ]; then cp "$F/Packages/manifest.json" Packages/manifest.json; echo "  + Packages/manifest.json (from factory)"; fi
+          python3 - <<'EOF'
+          import json,re,os
+          m=json.load(open('Packages/manifest.json')); deps=m.setdefault('dependencies',{})
+          # remove packages that need Editor-side setup / are unsupported in CI
+          for bad in ['com.unity.collab-proxy','com.unity.visualscripting','com.unity.ide.rider','com.unity.ide.visualstudio','com.unity.ide.vscode','com.unity.test-framework','com.unity.timeline','com.unity.multiplayer.center','com.unity.ai.navigation.samples']:
+              deps.pop(bad,None)
+          uses_urp = 'com.unity.render-pipelines.universal' in deps
+          if uses_urp: deps['com.unity.render-pipelines.universal']='17.0.4'
+          deps.setdefault('com.unity.ugui','2.0.0')
+          for mod in ['androidjni','animation','audio','imageconversion','imgui','jsonserialize','particlesystem','physics','physics2d','screencapture','ui','uielements','unitywebrequest','unitywebrequesttexture','terrain','video','vehicles','wind','tilemap','ai','director','cloth']:
+              deps.setdefault('com.unity.modules.'+mod,'1.0.0')
+          json.dump(m,open('Packages/manifest.json','w'),indent=2)
+          # ProjectSettings.asset fixes
+          p='ProjectSettings/ProjectSettings.asset'; s=open(p).read()
+          new_input = 'com.unity.inputsystem' in deps
+          s=re.sub(r'activeInputHandler: \d', 'activeInputHandler: '+('1' if new_input else '0'), s)
+          open(p,'w').write(s)
+          print('URP' if uses_urp else 'Built-in RP', '| input:', 'new' if new_input else 'legacy')
+          # GraphicsSettings: if project uses URP but has no pipeline asset assigned, use the factory mobile URP asset
+          g='ProjectSettings/GraphicsSettings.asset'; gs=open(g).read()
+          if uses_urp and 'm_CustomRenderPipeline: {fileID: 0}' in gs:
+              F=os.environ['F']
+              gs=gs.replace('m_CustomRenderPipeline: {fileID: 0}','m_CustomRenderPipeline: {fileID: 11400000, guid: 5e6cbd92db86f4b18aec3ed561671858, type: 2}')
+              open(g,'w').write(gs); open('.need_factory_settings','w').write('1'); print('  * assigned factory URP asset')
+          if not uses_urp and 'guid: 5e6cbd92db86f4b18aec3ed561671858' in gs:
+              gs=re.sub(r'm_CustomRenderPipeline: \{fileID: 11400000, guid: 5e6cbd92db86f4b18aec3ed561671858, type: 2\}','m_CustomRenderPipeline: {fileID: 0}',gs); open(g,'w').write(gs)
+              q='ProjectSettings/QualitySettings.asset'; qs=open(q).read(); qs=re.sub(r'customRenderPipeline: \{fileID: 11400000, guid: 5e6cbd92db86f4b18aec3ed561671858, type: 2\}','customRenderPipeline: {fileID: 0}',qs); open(q,'w').write(qs)
+              print('  * built-in pipeline: cleared factory URP references')
+          EOF
+          if [ -f .need_factory_settings ] || { [ "$COPIED_SETTINGS" = 1 ] && [ ! -d Assets/Settings ]; }; then
+            if grep -q 'render-pipelines.universal' Packages/manifest.json && [ ! -f Assets/Settings/Mobile_RPAsset.asset ]; then
+              mkdir -p Assets/Settings && cp -a "$F/Assets/Settings/." Assets/Settings/ && cp "$F/Assets/Settings.meta" Assets/Settings.meta; echo "  + Assets/Settings (URP mobile assets)"
+            fi
+          fi
+          rm -f .need_factory_settings
+          # 4) build.json
+          if [ ! -f build.json ]; then
+            NAME=$(grep -m1 '^  productName:' ProjectSettings/ProjectSettings.asset | sed 's/^  productName: //'); [ -n "$NAME" ] || NAME="$GAME_NAME"
+            printf '{ "productName": "%s" }\n' "$NAME" > build.json; echo "  + build.json (name: $NAME)"
+          fi
+          echo "---- build.json"; cat build.json
+          echo "---- scenes"; find Assets -name '*.unity' | head -20
+          echo "---- tree"; find . -maxdepth 2 -not -path './Assets/*' | sort
+        env:
+          F: ${{ github.workspace }}/factory
+
+      - name: Install Unity + Android module
+        uses: buildalon/unity-setup@v2
+        with:
+          version-file: project/ProjectSettings/ProjectVersion.txt
+          build-targets: Android
+          hub-version: '3.14.3'
+          cache-installation: true
+
+      - name: Activate Unity Personal license
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: Personal
+          username: ${{ secrets.UNITY_EMAIL }}
+          password: ${{ secrets.UNITY_PASSWORD }}
+
+      - name: Restore Android keystore
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build (FactoryBuild.Build)
+        id: unity
+        continue-on-error: true
+        uses: buildalon/unity-action@v3
+        env:
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEYALIAS_NAME: ${{ secrets.ANDROID_KEYALIAS_NAME }}
+          ANDROID_KEYALIAS_PASS: ${{ secrets.ANDROID_KEYALIAS_PASS }}
+        with:
+          project-path: ${{ github.workspace }}/project
+          build-target: Android
+          log-name: Unity-Build
+          args: >-
+            -quit -batchmode -nographics
+            -executeMethod FactoryBuild.Build
+            -buildTarget Android
+            -customBuildPath ${{ github.workspace }}/out/game.apk
+            -androidVersionCode ${{ github.run_number }}
+            -buildVersion 1.0.${{ github.run_number }}
+            -androidTargetSdkVersion 34
+            -androidExportType ${{ env.EXPORT_TYPE }}
+
+      - name: Publish result to release
+        if: always()
+        run: |
+          set +e
+          OUT=$(find out -name '*.apk' -o -name '*.aab' 2>/dev/null | head -n 1)
+          LOG=$(find project/Logs project/Builds project . -maxdepth 3 -name 'Unity-Build*.log' 2>/dev/null | head -n 1)
+          [ -n "$LOG" ] || LOG=$(find . -name '*.log' -newer factory/README.md -size +1k 2>/dev/null | grep -v node_modules | head -n 1)
+          echo "apk=$OUT log=$LOG unity_outcome=${{ steps.unity.outcome }}"
+          if [ -n "$OUT" ] && [ "${{ steps.unity.outcome }}" = "success" ]; then STATUS=success; else STATUS=failed; fi
+
+          # ---- error summary (Arabic header + the lines an AI needs to fix the project) ----
+          {
+            echo "=== ملخص أخطاء بناء «$GAME_NAME» (build $BUILD_ID) ==="
+            echo "Unity $(grep -m1 m_EditorVersion project/ProjectSettings/ProjectVersion.txt | awk '{print $2}') · Android · IL2CPP"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            if [ -f upload/fatal.txt ]; then echo "FATAL: $(cat upload/fatal.txt) — الـ zip لا يحوي مجلد Assets/"; fi
+            if [ -n "$LOG" ]; then
+              echo "--- C# compile errors ---";        grep -E "error CS[0-9]+" "$LOG" | sed 's/^.*Assets/Assets/' | sort -u | head -80
+              echo "--- Shader errors ---";            grep -iE "Shader error|shader compiler|error X[0-9]+|Couldn't open include" "$LOG" | sort -u | head -40
+              echo "--- Missing / broken assets ---";  grep -iE "Could not find|is missing|Missing script|Broken text PPtr|Unknown package|cannot be found|not found" "$LOG" | sort -u | head -40
+              echo "--- Build pipeline ---";           grep -E "\[FactoryBuild\]|BuildFailedException|Build completed with a result|Error building Player|UnityException|Exception:|Gradle|FAILURE:|What went wrong" "$LOG" | sort -u | head -60
+              echo "--- Last 60 log lines ---";        tail -n 60 "$LOG"
+            else
+              echo "(لم يُنتَج ملف log — غالباً فشلت خطوة سابقة: تثبيت Unity أو الترخيص أو فك الـ zip. راجع رابط الـ Run أعلاه)"
+            fi
+          } > error.txt 2>/dev/null
+          [ -n "$LOG" ] && cp "$LOG" full-log.txt
+
+          API="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          UP="https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets"
+          H1="Authorization: Bearer $GH_TOKEN"; H2="Accept: application/vnd.github+json"
+          SLUG=$(echo "$GAME_NAME" | sed 's/[^A-Za-z0-9]//g'); [ -n "$SLUG" ] || SLUG=Game
+          if [ "$STATUS" = success ]; then
+            EXT="${OUT##*.}"; APK_NAME="$SLUG-$BUILD_ID.$EXT"
+            curl -sS -H "$H1" -H "$H2" -H "Content-Type: application/octet-stream" --data-binary @"$OUT" "$UP?name=$APK_NAME" > apk.json
+            APK_ASSET_ID=$(python3 -c "import json;print(json.load(open('apk.json')).get('id',''))")
+            SIZE=$(stat -c %s "$OUT")
+          fi
+          curl -sS -H "$H1" -H "$H2" -H "Content-Type: text/plain" --data-binary @error.txt "$UP?name=error.txt" > err.json
+          ERR_ASSET_ID=$(python3 -c "import json;print(json.load(open('err.json')).get('id',''))")
+          LOG_ASSET_ID=""
+          if [ -f full-log.txt ]; then
+            gzip -9 -k full-log.txt
+            curl -sS -H "$H1" -H "$H2" -H "Content-Type: application/gzip" --data-binary @full-log.txt.gz "$UP?name=full-log.txt.gz" > log.json
+            LOG_ASSET_ID=$(python3 -c "import json;print(json.load(open('log.json')).get('id',''))")
+          fi
+          python3 - <<EOF
+          import json, urllib.request, datetime
+          body = json.dumps({"status":"$STATUS","build_id":"$BUILD_ID","name":"""$GAME_NAME""",
+                             "run_url":"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID",
+                             "apk_asset_id":"${APK_ASSET_ID:-}","apk_name":"${APK_NAME:-}","apk_size":"${SIZE:-}",
+                             "error_asset_id":"${ERR_ASSET_ID:-}","log_asset_id":"${LOG_ASSET_ID:-}",
+                             "finished": datetime.datetime.utcnow().isoformat()+"Z"}, ensure_ascii=False)
+          req = urllib.request.Request("$API", data=json.dumps({"body": body}).encode(), method="PATCH",
+                headers={"Authorization":"Bearer $GH_TOKEN","Accept":"application/vnd.github+json","Content-Type":"application/json"})
+          urllib.request.urlopen(req).read(); print("release updated:", "$STATUS")
+          EOF
+          [ "$STATUS" = success ] || exit 1

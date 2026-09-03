@@ -1,6 +1,6 @@
 // Unity Mobile Game Factory — generic CI build entry point (Android).
 // Called by .github/workflows/build-android.yml through:
-//   -executeMethod BuildScript.Build -customBuildPath <apk> -androidVersionCode <n> -buildVersion <x.y.z>
+//   -executeMethod FactoryBuild.Build -customBuildPath <apk> -androidVersionCode <n> -buildVersion <x.y.z>
 //   -androidTargetSdkVersion 34 -androidExportType androidPackage|androidAppBundle
 // Everything game-specific (product name, package id, scenes, orientation) is read from the PROJECT itself
 // (ProjectSettings + EditorBuildSettings) or from an optional `build.json` at the repo root:
@@ -17,7 +17,7 @@ using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
-public static class BuildScript
+public static class FactoryBuild
 {
     [Serializable]
     class BuildConfig
@@ -50,8 +50,8 @@ public static class BuildScript
         var cfg = new BuildConfig();
         if (File.Exists("build.json"))
         {
-            try { JsonUtility.FromJsonOverwrite(File.ReadAllText("build.json"), cfg); Console.WriteLine("[BuildScript] build.json loaded"); }
-            catch (Exception e) { Console.WriteLine("[BuildScript] build.json invalid: " + e.Message); }
+            try { JsonUtility.FromJsonOverwrite(File.ReadAllText("build.json"), cfg); Console.WriteLine("[FactoryBuild] build.json loaded"); }
+            catch (Exception e) { Console.WriteLine("[FactoryBuild] build.json invalid: " + e.Message); }
         }
         return cfg;
     }
@@ -62,7 +62,7 @@ public static class BuildScript
         {
             var ok = cfg.scenes.Where(File.Exists).ToArray();
             if (ok.Length > 0) return ok;
-            Console.WriteLine("[BuildScript] scenes in build.json not found on disk, falling back");
+            Console.WriteLine("[FactoryBuild] scenes in build.json not found on disk, falling back");
         }
         var enabled = EditorBuildSettings.scenes.Where(s => s.enabled && File.Exists(s.path)).Select(s => s.path).ToArray();
         if (enabled.Length > 0) return enabled;
@@ -74,7 +74,7 @@ public static class BuildScript
 
     static string Slug(string s) => Regex.Replace(s ?? "Game", @"[^A-Za-z0-9]+", "").Trim('_');
 
-    [MenuItem("Build/Android APK")]
+    [MenuItem("Factory/Build Android APK")]
     public static void Build()
     {
         var args = Args();
@@ -86,7 +86,7 @@ public static class BuildScript
         string[] scenes = ResolveScenes(cfg);
         if (scenes.Length == 0)
         {
-            Console.WriteLine("[BuildScript] ERROR: no scene found. Add a scene under Assets/ and list it in build.json or File > Build Settings.");
+            Console.WriteLine("[FactoryBuild] ERROR: no scene found. Add a scene under Assets/ and list it in build.json or File > Build Settings.");
             EditorApplication.Exit(1); return;
         }
         EditorBuildSettings.scenes = scenes.Select(p => new EditorBuildSettingsScene(p, true)).ToArray();
@@ -97,9 +97,9 @@ public static class BuildScript
         if (!buildPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) buildPath = Path.ChangeExtension(buildPath, ext);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(buildPath)));
 
-        Console.WriteLine($"[BuildScript] product='{PlayerSettings.productName}' id={PlayerSettings.GetApplicationIdentifier(NamedBuildTarget.Android)} version={PlayerSettings.bundleVersion} code={PlayerSettings.Android.bundleVersionCode}");
-        Console.WriteLine($"[BuildScript] scenes: {string.Join(", ", scenes)}");
-        Console.WriteLine($"[BuildScript] target={target} path={buildPath}");
+        Console.WriteLine($"[FactoryBuild] product='{PlayerSettings.productName}' id={PlayerSettings.GetApplicationIdentifier(NamedBuildTarget.Android)} version={PlayerSettings.bundleVersion} code={PlayerSettings.Android.bundleVersionCode}");
+        Console.WriteLine($"[FactoryBuild] scenes: {string.Join(", ", scenes)}");
+        Console.WriteLine($"[FactoryBuild] target={target} path={buildPath}");
 
         var options = new BuildPlayerOptions
         {
@@ -111,10 +111,10 @@ public static class BuildScript
         };
         BuildReport report = BuildPipeline.BuildPlayer(options);
         var s = report.summary;
-        Console.WriteLine($"[BuildScript] result={s.result} size={s.totalSize} errors={s.totalErrors} warnings={s.totalWarnings} time={s.totalTime}");
+        Console.WriteLine($"[FactoryBuild] result={s.result} size={s.totalSize} errors={s.totalErrors} warnings={s.totalWarnings} time={s.totalTime}");
         foreach (var step in report.steps)
             foreach (var m in step.messages)
-                if (m.type == LogType.Error || m.type == LogType.Exception) Console.WriteLine($"[BuildScript][{step.name}] {m.content}");
+                if (m.type == LogType.Error || m.type == LogType.Exception) Console.WriteLine($"[FactoryBuild][{step.name}] {m.content}");
         EditorApplication.Exit(s.result == BuildResult.Succeeded ? 0 : 1);
     }
 
@@ -161,12 +161,12 @@ public static class BuildScript
             PlayerSettings.Android.keystorePass = Arg(args, "androidKeystorePass", "ANDROID_KEYSTORE_PASS");
             PlayerSettings.Android.keyaliasName = Arg(args, "androidKeyaliasName", "ANDROID_KEYALIAS_NAME");
             PlayerSettings.Android.keyaliasPass = Arg(args, "androidKeyaliasPass", "ANDROID_KEYALIAS_PASS");
-            Console.WriteLine("[BuildScript] custom keystore applied");
+            Console.WriteLine("[FactoryBuild] custom keystore applied");
         }
         else
         {
             PlayerSettings.Android.useCustomKeystore = false;
-            Console.WriteLine("[BuildScript] debug keystore (installable, not for Play Store)");
+            Console.WriteLine("[FactoryBuild] debug keystore (installable, not for Play Store)");
         }
         EditorUserBuildSettings.buildAppBundle = args.TryGetValue("androidExportType", out var et) && et == "androidAppBundle";
         EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;

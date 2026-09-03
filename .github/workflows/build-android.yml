@@ -3,7 +3,7 @@ name: Build Android APK
 # Unity Mobile Game Factory — يبني أي لعبة Unity في هذا المستودع إلى APK تلقائياً عند كل push على main.
 #   1) buildalon/unity-setup            → يثبّت Unity (الإصدار من ProjectSettings/ProjectVersion.txt) + Android module
 #   2) buildalon/activate-unity-license → ترخيص Personal أونلاين (UNITY_EMAIL / UNITY_PASSWORD فقط، بدون ملف .ulf)
-#   3) BuildScript.Build                → IL2CPP ARM64(+ARMv7)، الاسم/الحزمة/المشاهد من build.json و ProjectSettings
+#   3) FactoryBuild.Build                → IL2CPP ARM64(+ARMv7)، الاسم/الحزمة/المشاهد من build.json و ProjectSettings
 #   4) نشر الـ APK في Releases باسم اللعبة
 #
 # Secrets المطلوبة (Settings → Secrets and variables → Actions):
@@ -106,7 +106,7 @@ jobs:
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
           echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
 
-      - name: Build (BuildScript.Build)
+      - name: Build (FactoryBuild.Build)
         uses: buildalon/unity-action@v3
         env:
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
@@ -118,7 +118,7 @@ jobs:
           log-name: Android-Build
           args: >-
             -quit -batchmode -nographics
-            -executeMethod BuildScript.Build
+            -executeMethod FactoryBuild.Build
             -buildTarget Android
             -customBuildPath ${{ github.workspace }}/build/Android/${{ steps.meta.outputs.slug }}.apk
             -androidVersionCode ${{ github.run_number }}
