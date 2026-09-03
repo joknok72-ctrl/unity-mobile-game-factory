@@ -6,9 +6,6 @@
 // (fallback / manual), pinch to zoom (binocular mode) — zoom is honest: it changes FOV only.
 using System;
 using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.EnhancedTouch;
-using Touch = UnityEngine.InputSystem.EnhancedTouch.Touch;
 
 namespace RealLife.Sky
 {
@@ -38,7 +35,7 @@ namespace RealLife.Sky
             _cam = GetComponent<Camera>() ?? gameObject.AddComponent<Camera>();
             _cam.nearClipPlane = 0.05f; _cam.farClipPlane = 2000f;
             _cam.clearFlags = CameraClearFlags.Skybox;
-            EnhancedTouchSupport.Enable();
+            Input.multiTouchEnabled = true;
         }
 
         void Start()
@@ -93,24 +90,26 @@ namespace RealLife.Sky
 
         void HandleTouch()
         {
-            var touches = Touch.activeTouches;
-            if (touches.Count == 1)
+            int n = Input.touchCount;
+            if (n == 1)
             {
-                var t = touches[0];
-                if (t.phase == UnityEngine.InputSystem.TouchPhase.Moved)
+                var t = Input.GetTouch(0);
+                if (t.phase == TouchPhase.Moved)
                 {
                     // 1 pixel = FOV/height degrees: drag moves the sky exactly under the finger
                     float degPerPx = _fov / Screen.height;
                     if (mode == Mode.Gyro) { mode = Mode.Touch; SyncTouchFromCurrent(); }
-                    _yaw -= t.delta.x * degPerPx;
-                    _pitch = Mathf.Clamp(_pitch + t.delta.y * degPerPx, -30f, 90f);
+                    _yaw -= t.deltaPosition.x * degPerPx;
+                    _pitch = Mathf.Clamp(_pitch + t.deltaPosition.y * degPerPx, -30f, 90f);
                 }
-                if (t.phase == UnityEngine.InputSystem.TouchPhase.Began && t.tapCount >= 2 && GyroAvailable) mode = Mode.Gyro;
+                if (t.phase == TouchPhase.Began && t.tapCount >= 2 && GyroAvailable) mode = Mode.Gyro;
+                _pinchStartDist = 0;
             }
-            else if (touches.Count == 2)
+            else if (n >= 2)
             {
-                float d = Vector2.Distance(touches[0].screenPosition, touches[1].screenPosition);
-                if (touches[1].phase == UnityEngine.InputSystem.TouchPhase.Began || _pinchStartDist <= 0) { _pinchStartDist = d; _pinchStartFov = _fov; }
+                var a = Input.GetTouch(0); var b = Input.GetTouch(1);
+                float d = Vector2.Distance(a.position, b.position);
+                if (b.phase == TouchPhase.Began || _pinchStartDist <= 0) { _pinchStartDist = d; _pinchStartFov = _fov; }
                 else if (d > 1f) _fov = Mathf.Clamp(_pinchStartFov * (_pinchStartDist / d), minFov, maxFov);
             }
             else _pinchStartDist = 0;

@@ -21,6 +21,11 @@ namespace RealLife.Sky
         void Start()
         {
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (UnityEngine.EventSystems.EventSystem.current == null)
+            {
+                var es = new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem), typeof(UnityEngine.EventSystems.StandaloneInputModule));
+                es.transform.SetParent(transform, false);
+            }
             var canvasGo = new GameObject("HUD Canvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGo.transform.SetParent(transform, false);
             var canvas = canvasGo.GetComponent<Canvas>(); canvas.renderMode = RenderMode.ScreenSpaceOverlay; canvas.sortingOrder = 100;

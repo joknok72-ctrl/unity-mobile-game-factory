@@ -28,6 +28,8 @@
 
 ## 📦 تنزيل الـ APK
 
+**أحدث إصدار:** <https://github.com/joknok72-ctrl/real-life-sky/releases/latest> — ✅ أول بناء ناجح v0.1.10 (37 MB)
+
 1. افتح تبويب **Releases** في هذا المستودع.
 2. حمّل `RealLifeSky-v0.1.N.apk` من آخر إصدار.
 3. على الموبايل: فعّل «تثبيت من مصادر غير معروفة» ثم ثبّت.
@@ -79,7 +81,7 @@ Assets/_Project/
 │  ├─ Data/star_names.json         145 اسم نجم
 │  └─ Textures/Moon_LROC_Albedo.jpg
 └─ Settings/                       URP Mobile RP Asset · Renderer · Volume Profile
-Packages/manifest.json             URP 17.0.4 · Input System 1.11.2 · uGUI 2.0
+Packages/manifest.json             URP 17.0.4 · uGUI 2.0 (Legacy Input للحساسات واللمس)
 ProjectSettings/                   Unity 6000.0.82f1 · Android · IL2CPP · Linear
 .github/workflows/build-android.yml
 ```

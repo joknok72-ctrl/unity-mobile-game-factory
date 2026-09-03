@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -63,16 +64,16 @@ public static class BuildScript
     {
         PlayerSettings.companyName = "RealLife Studio";
         PlayerSettings.productName = "Real Life Sky";
-        PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.reallife.sky");
+        PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.reallife.sky");
         PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;
         PlayerSettings.colorSpace = ColorSpace.Linear;
-        PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
+        PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64 | AndroidArchitecture.ARMv7;
         PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
         PlayerSettings.Android.forceInternetPermission = true;
         PlayerSettings.Android.startInFullscreen = true;
         PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { UnityEngine.Rendering.GraphicsDeviceType.Vulkan, UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
-        PlayerSettings.SetIl2CppCompilerConfiguration(BuildTargetGroup.Android, Il2CppCompilerConfiguration.Release);
+        PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Android, Il2CppCompilerConfiguration.Release);
         PlayerSettings.gcIncremental = true;
 
         if (args.TryGetValue("androidVersionCode", out var vc) && int.TryParse(vc, out int code)) PlayerSettings.Android.bundleVersionCode = code;
