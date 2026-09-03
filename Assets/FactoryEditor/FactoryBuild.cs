@@ -111,7 +111,7 @@ public static class FactoryBuild
             locationPathName = buildPath,
             target = target,
             targetGroup = BuildPipeline.GetBuildTargetGroup(target),
-            options = BuildOptions.None
+            options = fast ? BuildOptions.CompressWithLz4 : BuildOptions.None
         };
         BuildReport report = BuildPipeline.BuildPlayer(options);
         var s = report.summary;
@@ -153,6 +153,8 @@ public static class FactoryBuild
         PlayerSettings.gcIncremental = true;
         PlayerSettings.stripEngineCode = true;
         SetBurstAot(!fast);
+        EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
+        PlayerSettings.Android.optimizedFramePacing = !fast;
 
         if (args.TryGetValue("androidVersionCode", out var vc) && int.TryParse(vc, out int code)) PlayerSettings.Android.bundleVersionCode = code;
         else PlayerSettings.Android.bundleVersionCode = Math.Max(1, PlayerSettings.Android.bundleVersionCode);

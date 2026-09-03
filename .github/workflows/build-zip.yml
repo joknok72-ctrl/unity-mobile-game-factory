@@ -155,8 +155,38 @@ jobs:
         id: key
         run: |
           python3 "$GITHUB_WORKSPACE/progress.py" install_unity 10
-          H=$(cat project/Packages/manifest.json project/ProjectSettings/ProjectVersion.txt | sha256sum | cut -c1-16)
-          echo "lib=unity-library-v1-$PROFILE-$H" >> "$GITHUB_OUTPUT"
+          # project identity: build.json "project" (stable slug) > packageName > productName > uploaded name
+          PROJ=$(python3 - <<'EOF'
+          import json,re,os
+          try: b=json.load(open('project/build.json'))
+          except Exception: b={}
+          k = b.get('project') or b.get('packageName') or b.get('productName') or os.environ.get('PROJECT_KEY') or os.environ.get('GAME_NAME') or 'game'
+          k = re.sub(r'[^a-z0-9]+','-', str(k).lower()).strip('-')[:40] or 'game'
+          print(k)
+          EOF
+          )
+          PK=$(python3 -c "import json,hashlib;d=json.load(open('project/Packages/manifest.json')).get('dependencies',{});print(hashlib.sha256(json.dumps(sorted(d.items())).encode()).hexdigest()[:12])")
+          UV=$(grep -m1 m_EditorVersion project/ProjectSettings/ProjectVersion.txt | awk '{print $2}')
+          echo "project=$PROJ" >> "$GITHUB_OUTPUT"
+          echo "exact=unity-lib-v2-$UV-$PROFILE-$PROJ-$PK" >> "$GITHUB_OUTPUT"
+          echo "proj=unity-lib-v2-$UV-$PROFILE-$PROJ-" >> "$GITHUB_OUTPUT"
+          echo "pkgs=unity-lib-v2-$UV-$PROFILE-any-$PK" >> "$GITHUB_OUTPUT"
+          echo "any=unity-lib-v2-$UV-$PROFILE-" >> "$GITHUB_OUTPUT"
+          echo "project=$PROJ  packages=$PK  unity=$UV  profile=$PROFILE"
+          export PROJ_KEY="$PROJ"
+          python3 - <<'EOF'
+          # record project key into the release body so the app can group builds
+          import json,os,urllib.request
+          H={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"}
+          api=f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/{os.environ['RELEASE_ID']}"
+          try:
+              cur=json.loads(json.load(urllib.request.urlopen(urllib.request.Request(api,headers=H))).get("body") or "{}")
+          except Exception: cur={}
+          cur["project"]=os.environ["PROJ_KEY"]
+          urllib.request.urlopen(urllib.request.Request(api,data=json.dumps({"body":json.dumps(cur,ensure_ascii=False)}).encode(),method="PATCH",headers=H)).read()
+          EOF
+        env:
+          PROJECT_KEY: ${{ github.event.client_payload.project }}
 
       - name: Restore Library cache (imports + IL2CPP incremental)
         id: libcache
@@ -165,9 +195,23 @@ jobs:
           path: |
             project/Library
             !project/Library/Bee/Android/Prj/**/Gradle/**/build
-          key: ${{ steps.key.outputs.lib }}-${{ github.run_id }}
+          key: ${{ steps.key.outputs.exact }}-${{ github.run_id }}
           restore-keys: |
-            ${{ steps.key.outputs.lib }}-
+            ${{ steps.key.outputs.exact }}-
+            ${{ steps.key.outputs.proj }}
+            ${{ steps.key.outputs.pkgs }}-
+            ${{ steps.key.outputs.any }}
+
+      - name: Restore Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-v1-${{ steps.key.outputs.project }}-${{ github.run_id }}
+          restore-keys: |
+            gradle-v1-${{ steps.key.outputs.project }}-
+            gradle-v1-
 
       - name: Detect Library cache hit
         id: libhit
@@ -230,6 +274,7 @@ jobs:
         if: always()
         env:
           CACHE_HIT: ${{ steps.libhit.outputs.hit }}
+          PROJ_OUT: ${{ steps.key.outputs.project }}
         run: |
           set +e
           OUT=$(find out -name '*.apk' -o -name '*.aab' 2>/dev/null | head -n 1)
@@ -324,6 +369,7 @@ jobs:
                   "error_asset_id": E.get("ERR_ASSET_ID",""), "log_asset_id": E.get("LOG_ASSET_ID",""),
                   "errors": int(E.get("N_ERR") or 0), "warnings": int(E.get("N_WARN") or 0), "fixes": rd("fixes.txt"),
                   "diagnosis": rd("diag.txt"), "cache_hit": E.get("CACHE_HIT","") == "true",
+                  "project": cur.get("project") or E.get("PROJ_OUT",""), "version": cur.get("version"),
                   "started": started, "duration": dur, "step": "done", "percent": 100,
                   "finished": now.isoformat()+"Z"}
           req = urllib.request.Request(E["API"], data=json.dumps({"body": json.dumps(body, ensure_ascii=False)}).encode(), method="PATCH", headers=H)

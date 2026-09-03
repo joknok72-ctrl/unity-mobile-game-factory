@@ -30,6 +30,8 @@ build or a broken APK.
 
 The workflows, `Assets/FactoryEditor/FactoryBuild.cs` and `Assets/Settings/*` are **infrastructure** (auto-merged into every zip). Do not edit them per game.
 Per-game configuration lives in **`build.json`** (productName, companyName, packageName, orientation, scenes).
+**Always include a stable `"project"` slug** (e.g. `"project": "bus-simulator"`) and bump `"version"` (e.g. `"1.3"`) on every new zip of the same game.
+The factory uses `project` (falls back to `packageName`) to reuse the build cache across versions — keep it IDENTICAL between versions of the same game, even if productName changes. Do not rename `packageName` between versions.
 
 ## 1. Where the game goes
 ```
