@@ -30,6 +30,7 @@ jobs:
       ASSET_ID: ${{ github.event.client_payload.asset_id }}
       GAME_NAME: ${{ github.event.client_payload.name }}
       EXPORT_TYPE: ${{ github.event.client_payload.export_type || 'androidPackage' }}
+      PROFILE: ${{ github.event.client_payload.profile || 'fast' }}
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - name: Checkout factory
@@ -39,25 +40,35 @@ jobs:
 
       - name: Mark release as building
         run: |
-          python3 - <<'EOF'
-          import json, os, urllib.request
-          body = json.dumps({"status":"building","build_id":os.environ["BUILD_ID"],"name":os.environ["GAME_NAME"],
-                             "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
-                             "started": __import__('datetime').datetime.utcnow().isoformat()+"Z"}, ensure_ascii=False)
-          req = urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/{os.environ['RELEASE_ID']}",
-                                       data=json.dumps({"body": body}).encode(), method="PATCH",
-                                       headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"})
+          cat > "$GITHUB_WORKSPACE/progress.py" <<'EOF'
+          import json, os, sys, urllib.request, datetime
+          # usage: progress.py <step-key> [percent]
+          step = sys.argv[1]; pct = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+          api = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/releases/{os.environ['RELEASE_ID']}"
+          H = {"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json", "Content-Type": "application/json"}
+          try:
+              cur = json.loads(urllib.request.urlopen(urllib.request.Request(api, headers=H)).read()).get("body") or "{}"
+              body = json.loads(cur) if cur.strip().startswith("{") else {}
+          except Exception: body = {}
+          body.update({"status": "building", "build_id": os.environ["BUILD_ID"], "name": os.environ["GAME_NAME"],
+                       "profile": os.environ.get("PROFILE", "fast"), "export_type": os.environ.get("EXPORT_TYPE", "androidPackage"),
+                       "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+                       "step": step, "percent": pct, "updated": datetime.datetime.utcnow().isoformat() + "Z"})
+          body.setdefault("started", datetime.datetime.utcnow().isoformat() + "Z")
+          req = urllib.request.Request(api, data=json.dumps({"body": json.dumps(body, ensure_ascii=False)}).encode(), method="PATCH", headers=H)
           urllib.request.urlopen(req).read()
           EOF
+          python3 "$GITHUB_WORKSPACE/progress.py" start 2
 
-      - name: Free disk space
+      - name: Free disk space (background)
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/lib/node_modules
-          sudo docker image prune --all --force || true
-          df -h /
+          # Only the big, safe directories; runs in background so it costs ~0s of wall time.
+          (sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/local/lib/android/sdk/ndk 2>/dev/null; echo "cleanup done") &
+          df -h / | tail -1
 
       - name: Download & extract project zip
         run: |
+          python3 "$GITHUB_WORKSPACE/progress.py" unzip 5
           mkdir -p upload project
           curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
             -o upload/project.zip "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$ASSET_ID"
@@ -140,6 +151,23 @@ jobs:
         env:
           F: ${{ github.workspace }}/factory
 
+      - name: Compute cache key
+        id: key
+        run: |
+          python3 "$GITHUB_WORKSPACE/progress.py" install_unity 10
+          H=$(cat project/Packages/manifest.json project/ProjectSettings/ProjectVersion.txt | sha256sum | cut -c1-16)
+          echo "lib=unity-library-v1-$PROFILE-$H" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Library cache (imports + IL2CPP incremental)
+        uses: actions/cache@v4
+        with:
+          path: |
+            project/Library
+            !project/Library/Bee/Android/Prj/**/Gradle/**/build
+          key: ${{ steps.key.outputs.lib }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ steps.key.outputs.lib }}-
+
       - name: Install Unity + Android module
         uses: buildalon/unity-setup@v2
         with:
@@ -147,6 +175,9 @@ jobs:
           build-targets: Android
           hub-version: '3.14.3'
           cache-installation: true
+
+      - name: Progress → activate
+        run: python3 "$GITHUB_WORKSPACE/progress.py" license 22
 
       - name: Activate Unity Personal license
         uses: buildalon/activate-unity-license@v2
@@ -162,6 +193,9 @@ jobs:
         run: |
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/release.keystore"
           echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Progress → build
+        run: python3 "$GITHUB_WORKSPACE/progress.py" build 28
 
       - name: Build (FactoryBuild.Build)
         id: unity
@@ -184,6 +218,7 @@ jobs:
             -buildVersion 1.0.${{ github.run_number }}
             -androidTargetSdkVersion 34
             -androidExportType ${{ env.EXPORT_TYPE }}
+            -buildProfile ${{ env.PROFILE }}
 
       - name: Publish result to release
         if: always()
@@ -203,6 +238,19 @@ jobs:
             echo
             if [ -f upload/fatal.txt ]; then echo "FATAL: $(cat upload/fatal.txt) — الـ zip لا يحوي مجلد Assets/"; fi
             if [ -n "$LOG" ]; then
+              echo "--- التشخيص السريع (Diagnosis) ---"
+              NCS=$(grep -cE "\): error CS[0-9]+" "$LOG"); [ "$NCS" -gt 0 ] && echo "* $NCS خطأ C# — الكود لا يُترجم. أصلح الأسطر المذكورة تحت (الملف(السطر,العمود))."
+              grep -qE "error CS0246|error CS0103" "$LOG" && echo "* نوع/اسم غير معروف (CS0246/CS0103): غالباً حزمة ناقصة في Packages/manifest.json أو using ناقص أو Input System غير مثبت (استخدم Legacy Input)."
+              grep -qE "error CS0234.*UnityEditor|error CS0103.*AssetDatabase|UnityEditor" "$LOG" | grep -q "error CS" && echo "* كود يستخدم UnityEditor داخل سكربت runtime — ضعه في مجلد Editor أو داخل #if UNITY_EDITOR."
+              grep -qiE "Shader error|Couldn't open include" "$LOG" && echo "* خطأ شيدر — تحقق من مسارات include وأن الشيدر متوافق مع URP."
+              grep -qE "Default Renderer is missing|no renderer" "$LOG" && echo "* URP asset بدون Renderer (تم إصلاحه تلقائياً هذه المرة) — أضف Mobile_Renderer.asset إلى m_RendererDataList."
+              grep -qE "Scene .* couldn't be loaded|no scene found|Cannot find scene" "$LOG" && echo "* مشهد غير موجود — تأكد أن build.json يشير إلى مسار .unity صحيح داخل Assets/."
+              grep -qE "Unknown package|Cannot resolve|Package .* not found|Failed to resolve packages" "$LOG" && echo "* حزمة غير موجودة في manifest.json — احذفها أو صحّح اسمها/إصدارها."
+              grep -qE "Both input handlers|activeInputHandler" "$LOG" && echo "* تعارض نظام الإدخال — استخدم Legacy Input فقط (activeInputHandler: 0)."
+              grep -qE "Gradle|What went wrong|AAPT" "$LOG" && grep -qE "FAILURE|FAILED" "$LOG" && echo "* فشل Gradle/Android — غالباً AndroidManifest.xml أو مكتبة plugin غير متوافقة أو package name غير صالح."
+              grep -qE "Broken text PPtr|Missing script|Unknown script" "$LOG" && echo "* مراجع مكسورة في المشهد (GUID لا يطابق .meta) — تأكد أن guid في .meta الخاص بالسكربت يطابق ما في المشهد."
+              grep -qE "OutOfMemory|Killed|exit code 137" "$LOG" && echo "* نفدت الذاكرة على السيرفر — قلّل حجم الأصول/الشيدرات."
+              echo
               echo "--- C# compile errors ---";        grep -E "\(([0-9]+),([0-9]+)\): error CS[0-9]+" "$LOG" | sed 's/^.*Assets\//Assets\//' | sort -u | head -80
               echo "--- Shader errors ---";            grep -iE "Shader error|shader compiler|error X[0-9]+|Couldn't open include" "$LOG" | sort -u | head -40
               echo "--- Missing / broken assets ---";  grep -iE "Could not find|is missing|Missing script|Broken text PPtr|Unknown package|cannot be found|not found" "$LOG" | grep -vE "Native extension|^-r:|\.ref\.dll|Bee/artifacts" | sort -u | head -40

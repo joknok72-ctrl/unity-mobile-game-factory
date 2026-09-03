@@ -82,7 +82,11 @@ public static class FactoryBuild
         string buildTargetArg = args.TryGetValue("buildTarget", out var bt) && !string.IsNullOrEmpty(bt) ? bt : "Android";
         BuildTarget target = (BuildTarget)Enum.Parse(typeof(BuildTarget), buildTargetArg, true);
 
-        ApplyPlayerSettings(cfg, args);
+        string profile = args.TryGetValue("buildProfile", out var pf) && !string.IsNullOrEmpty(pf) ? pf.ToLowerInvariant() : "fast";
+        bool fast = profile == "fast";
+        Console.WriteLine($"[FactoryBuild] profile={profile}");
+        ApplyPlayerSettings(cfg, args, fast);
+        FixRenderPipeline();
         string[] scenes = ResolveScenes(cfg);
         if (scenes.Length == 0)
         {
@@ -118,7 +122,7 @@ public static class FactoryBuild
         EditorApplication.Exit(s.result == BuildResult.Succeeded ? 0 : 1);
     }
 
-    static void ApplyPlayerSettings(BuildConfig cfg, Dictionary<string, string> args)
+    static void ApplyPlayerSettings(BuildConfig cfg, Dictionary<string, string> args, bool fast)
     {
         if (!string.IsNullOrEmpty(cfg.productName)) PlayerSettings.productName = cfg.productName;
         if (!string.IsNullOrEmpty(cfg.companyName)) PlayerSettings.companyName = cfg.companyName;
@@ -134,13 +138,21 @@ public static class FactoryBuild
         // Mobile-only, modern, safe defaults (identical for every game built by this repo)
         PlayerSettings.colorSpace = ColorSpace.Linear;
         PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
-        PlayerSettings.Android.targetArchitectures = cfg.armv7 ? AndroidArchitecture.ARM64 | AndroidArchitecture.ARMv7 : AndroidArchitecture.ARM64;
+        // FAST profile = test builds: ARM64 only (halves IL2CPP time), no C++ optimisation, no Burst AOT, no minify.
+        // RELEASE profile = store builds: ARM64+ARMv7, optimised IL2CPP.
+        PlayerSettings.Android.targetArchitectures = (!fast && cfg.armv7) ? AndroidArchitecture.ARM64 | AndroidArchitecture.ARMv7 : AndroidArchitecture.ARM64;
         PlayerSettings.Android.minSdkVersion = (AndroidSdkVersions)Math.Max(23, cfg.minSdk);
         PlayerSettings.Android.forceInternetPermission = true;
         PlayerSettings.Android.startInFullscreen = true;
         PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { UnityEngine.Rendering.GraphicsDeviceType.Vulkan, UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3 });
-        PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Android, Il2CppCompilerConfiguration.Release);
+        PlayerSettings.SetIl2CppCompilerConfiguration(NamedBuildTarget.Android, fast ? Il2CppCompilerConfiguration.Debug : Il2CppCompilerConfiguration.Release);
+        PlayerSettings.SetIl2CppCodeGeneration(NamedBuildTarget.Android, fast ? Il2CppCodeGeneration.OptimizeSize : Il2CppCodeGeneration.OptimizeSpeed);
+        PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.Android, fast ? ManagedStrippingLevel.Low : ManagedStrippingLevel.Medium);
+        PlayerSettings.Android.minifyRelease = false;
+        PlayerSettings.Android.minifyDebug = false;
         PlayerSettings.gcIncremental = true;
+        PlayerSettings.stripEngineCode = true;
+        SetBurstAot(!fast);
 
         if (args.TryGetValue("androidVersionCode", out var vc) && int.TryParse(vc, out int code)) PlayerSettings.Android.bundleVersionCode = code;
         else PlayerSettings.Android.bundleVersionCode = Math.Max(1, PlayerSettings.Android.bundleVersionCode);
@@ -177,5 +189,82 @@ public static class FactoryBuild
     {
         if (args.TryGetValue(key, out var v) && !string.IsNullOrEmpty(v)) return v;
         return Environment.GetEnvironmentVariable(envName) ?? "";
+    }
+
+    /// Disable Burst AOT for fast builds (saves 1-3 min); enable for release.
+    static void SetBurstAot(bool enabled)
+    {
+        try
+        {
+            var t = Type.GetType("Unity.Burst.Editor.BurstPlatformAotSettings, Unity.Burst.Editor");
+            if (t == null) { Console.WriteLine("[FactoryBuild] burst not present"); return; }
+            var get = t.GetMethod("GetOrCreateSettings", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+            var save = t.GetMethod("Save", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+            var f = t.GetField("EnableBurstCompilation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+            if (get == null || f == null) { Console.WriteLine("[FactoryBuild] burst API changed, skipping"); return; }
+            var settings = get.Invoke(null, new object[] { BuildTarget.Android });
+            f.SetValue(settings, enabled);
+            save?.Invoke(settings, new object[] { BuildTarget.Android });
+            Console.WriteLine($"[FactoryBuild] burst AOT = {enabled}");
+        }
+        catch (Exception e) { Console.WriteLine("[FactoryBuild] burst toggle failed: " + e.Message); }
+    }
+
+    /// Self-heal common URP mistakes made by AI-generated projects so the game does not ship magenta/black:
+    ///  - URP asset with no renderer assigned  -> create a UniversalRendererData and assign it
+    ///  - GraphicsSettings without pipeline but URP package present -> assign the first URP asset found (or the factory one)
+    ///  - Quality levels pointing to nothing -> point them to the same asset
+    static void FixRenderPipeline()
+    {
+        try
+        {
+            var urpType = Type.GetType("UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset, Unity.RenderPipelines.Universal.Runtime");
+            if (urpType == null) { Console.WriteLine("[FactoryBuild] URP not in project (built-in pipeline)"); return; }
+
+            var current = UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline;
+            if (current == null)
+            {
+                var guids = AssetDatabase.FindAssets("t:UniversalRenderPipelineAsset");
+                string pick = guids.Select(AssetDatabase.GUIDToAssetPath).OrderBy(p => p.Contains("/Settings/") ? 0 : 1).FirstOrDefault();
+                if (pick != null)
+                {
+                    current = AssetDatabase.LoadAssetAtPath<UnityEngine.Rendering.RenderPipelineAsset>(pick);
+                    UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline = current;
+                    Console.WriteLine("[FactoryBuild] FIX: assigned render pipeline asset " + pick);
+                }
+            }
+            if (current == null) { Console.WriteLine("[FactoryBuild] WARNING: URP package present but no URP asset found"); return; }
+
+            // make every quality level use the same pipeline asset (avoids 'null pipeline' on some devices)
+            for (int i = 0; i < QualitySettings.names.Length; i++)
+            {
+                if (QualitySettings.GetRenderPipelineAssetAt(i) == null) QualitySettings.SetRenderPipelineAssetAt(i, current);
+            }
+
+            // renderer list check via SerializedObject (works across URP versions)
+            var so = new SerializedObject(current);
+            var list = so.FindProperty("m_RendererDataList");
+            bool broken = list == null || list.arraySize == 0;
+            if (!broken)
+                for (int i = 0; i < list.arraySize; i++) if (list.GetArrayElementAtIndex(i).objectReferenceValue == null) broken = true;
+            if (broken)
+            {
+                var rdType = Type.GetType("UnityEngine.Rendering.Universal.UniversalRendererData, Unity.RenderPipelines.Universal.Runtime");
+                var rd = ScriptableObject.CreateInstance(rdType);
+                string dir = Path.GetDirectoryName(AssetDatabase.GetAssetPath(current));
+                string rdPath = AssetDatabase.GenerateUniqueAssetPath(Path.Combine(dir, "Factory_AutoRenderer.asset"));
+                AssetDatabase.CreateAsset(rd, rdPath);
+                // copy default post-process data etc. is not required for a forward renderer
+                list = so.FindProperty("m_RendererDataList");
+                list.arraySize = 1;
+                list.GetArrayElementAtIndex(0).objectReferenceValue = rd;
+                var idx = so.FindProperty("m_DefaultRendererIndex"); if (idx != null) idx.intValue = 0;
+                so.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(current);
+                Console.WriteLine("[FactoryBuild] FIX: URP asset had no renderer -> created " + rdPath);
+            }
+            AssetDatabase.SaveAssets();
+        }
+        catch (Exception e) { Console.WriteLine("[FactoryBuild] FixRenderPipeline skipped: " + e.Message); }
     }
 }
