@@ -235,16 +235,7 @@ public static class FactoryBuild
             }
             if (current == null) { Console.WriteLine("[FactoryBuild] WARNING: URP package present but no URP asset found"); return; }
 
-            // make every quality level use the same pipeline asset (avoids 'null pipeline' on some devices)
-            int savedLevel = QualitySettings.GetQualityLevel();
-            for (int i = 0; i < QualitySettings.names.Length; i++)
-            {
-                if (QualitySettings.GetRenderPipelineAssetAt(i) != null) continue;
-                QualitySettings.SetQualityLevel(i, false);
-                QualitySettings.renderPipeline = current;
-                Console.WriteLine($"[FactoryBuild] FIX: quality level {i} had no pipeline -> assigned");
-            }
-            QualitySettings.SetQualityLevel(savedLevel, false);
+            // (quality levels with no pipeline fall back to GraphicsSettings.defaultRenderPipeline - nothing to fix)
 
             // renderer list check via SerializedObject (works across URP versions)
             var so = new SerializedObject(current);
