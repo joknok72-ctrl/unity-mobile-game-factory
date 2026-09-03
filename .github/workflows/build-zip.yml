@@ -159,6 +159,7 @@ jobs:
           echo "lib=unity-library-v1-$PROFILE-$H" >> "$GITHUB_OUTPUT"
 
       - name: Restore Library cache (imports + IL2CPP incremental)
+        id: libcache
         uses: actions/cache@v4
         with:
           path: |
@@ -222,6 +223,8 @@ jobs:
 
       - name: Publish result to release
         if: always()
+        env:
+          CACHE_HIT: ${{ steps.libcache.outputs.cache-matched-key != '' }}
         run: |
           set +e
           OUT=$(find out -name '*.apk' -o -name '*.aab' 2>/dev/null | head -n 1)
@@ -229,6 +232,15 @@ jobs:
           [ -n "$LOG" ] || LOG=$(find . -name '*.log' -newer factory/README.md -size +1k 2>/dev/null | grep -v node_modules | head -n 1)
           echo "apk=$OUT log=$LOG unity_outcome=${{ steps.unity.outcome }}"
           if [ -n "$OUT" ] && [ "${{ steps.unity.outcome }}" = "success" ]; then STATUS=success; else STATUS=failed; fi
+          python3 "$GITHUB_WORKSPACE/progress.py" publish 92
+          # ---- stats for the app (errors / warnings / fixes) ----
+          N_ERR=0; N_WARN=0; N_FIX=0
+          if [ -n "$LOG" ]; then
+            N_ERR=$(grep -cE "\): error CS[0-9]+|Shader error|Error building Player|BuildFailedException" "$LOG")
+            N_WARN=$(grep -cE "\): warning CS[0-9]+" "$LOG")
+            N_FIX=$(grep -c "\[FactoryBuild\] FIX:" "$LOG")
+            grep -oE "\[FactoryBuild\] FIX: .*" "$LOG" | sort -u | head -10 > fixes.txt
+          fi
 
           # ---- error summary (Arabic header + the lines an AI needs to fix the project) ----
           {
@@ -260,6 +272,7 @@ jobs:
               echo "(لم يُنتَج ملف log — غالباً فشلت خطوة سابقة: تثبيت Unity أو الترخيص أو فك الـ zip. راجع رابط الـ Run أعلاه)"
             fi
           } > error.txt 2>/dev/null
+          sed -n '/--- التشخيص السريع/,/^$/p' error.txt | grep '^\*' | head -8 > diag.txt || true
           [ -n "$LOG" ] && cp "$LOG" full-log.txt
 
           API="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
@@ -280,15 +293,35 @@ jobs:
             curl -sS -H "$H1" -H "$H2" -H "Content-Type: application/gzip" --data-binary @full-log.txt.gz "$UP?name=full-log.txt.gz" > log.json
             LOG_ASSET_ID=$(python3 -c "import json;print(json.load(open('log.json')).get('id',''))")
           fi
-          python3 - <<EOF
-          import json, urllib.request, datetime
-          body = json.dumps({"status":"$STATUS","build_id":"$BUILD_ID","name":"""$GAME_NAME""",
-                             "run_url":"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID",
-                             "apk_asset_id":"${APK_ASSET_ID:-}","apk_name":"${APK_NAME:-}","apk_size":"${SIZE:-}",
-                             "error_asset_id":"${ERR_ASSET_ID:-}","log_asset_id":"${LOG_ASSET_ID:-}",
-                             "finished": datetime.datetime.utcnow().isoformat()+"Z"}, ensure_ascii=False)
-          req = urllib.request.Request("$API", data=json.dumps({"body": body}).encode(), method="PATCH",
-                headers={"Authorization":"Bearer $GH_TOKEN","Accept":"application/vnd.github+json","Content-Type":"application/json"})
-          urllib.request.urlopen(req).read(); print("release updated:", "$STATUS")
+          export STATUS APK_ASSET_ID APK_NAME SIZE ERR_ASSET_ID LOG_ASSET_ID N_ERR N_WARN N_FIX API
+          python3 - <<'EOF'
+          import json, urllib.request, datetime, os
+          E = os.environ
+          H = {"Authorization":"Bearer "+E["GH_TOKEN"],"Accept":"application/vnd.github+json","Content-Type":"application/json"}
+          # keep started/profile from the building body
+          try:
+              cur = json.loads(json.load(urllib.request.urlopen(urllib.request.Request(E["API"], headers=H))).get("body") or "{}")
+          except Exception:
+              cur = {}
+          now = datetime.datetime.utcnow().replace(microsecond=0)
+          started = cur.get("started")
+          dur = None
+          if started:
+              try: dur = int((now - datetime.datetime.fromisoformat(started.rstrip("Z"))).total_seconds())
+              except Exception: dur = None
+          def rd(f):
+              try: return [l.strip() for l in open(f, encoding="utf-8") if l.strip()]
+              except Exception: return []
+          body = {"status": E["STATUS"], "build_id": E["BUILD_ID"], "name": E["GAME_NAME"],
+                  "profile": E.get("PROFILE","fast"), "export_type": E.get("EXPORT_TYPE",""),
+                  "run_url": f"{E['GITHUB_SERVER_URL']}/{E['GITHUB_REPOSITORY']}/actions/runs/{E['GITHUB_RUN_ID']}",
+                  "apk_asset_id": E.get("APK_ASSET_ID",""), "apk_name": E.get("APK_NAME",""), "apk_size": E.get("SIZE",""),
+                  "error_asset_id": E.get("ERR_ASSET_ID",""), "log_asset_id": E.get("LOG_ASSET_ID",""),
+                  "errors": int(E.get("N_ERR") or 0), "warnings": int(E.get("N_WARN") or 0), "fixes": rd("fixes.txt"),
+                  "diagnosis": rd("diag.txt"), "cache_hit": E.get("CACHE_HIT","") == "true",
+                  "started": started, "duration": dur, "step": "done", "percent": 100,
+                  "finished": now.isoformat()+"Z"}
+          req = urllib.request.Request(E["API"], data=json.dumps({"body": json.dumps(body, ensure_ascii=False)}).encode(), method="PATCH", headers=H)
+          urllib.request.urlopen(req).read(); print("release updated:", E["STATUS"], "duration", dur, "errors", body["errors"])
           EOF
           [ "$STATUS" = success ] || exit 1
